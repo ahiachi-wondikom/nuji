@@ -7,10 +7,16 @@
 // Development: Vite proxy → localhost:4000. Production: your Render backend.
 const BASE = (import.meta.env.VITE_API_URL || 'https://nuji2.onrender.com') + '/api';
 
+const adminToken = () => { try { return localStorage.getItem('nuji_admin_token') || ''; } catch { return ''; } };
+
 async function request(path, options = {}) {
   try {
+    const token = adminToken();
     const res = await fetch(BASE + path, {
-      headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {},
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {})
+      },
       ...options
     });
     if (!res.ok) return null;
