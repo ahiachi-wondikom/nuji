@@ -1,18 +1,60 @@
 // ============================================================
 // Nuji ADMIN PORTAL — standalone page (admin.html -> /admin)
-// Professional, fully responsive dashboard fed live by the API
+// Professional responsive dashboard: audio play/download, CSV/PDF export
 // ============================================================
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowRight, Award, FileText, Globe, Headphones, LayoutDashboard, LogOut,
-  LockKeyhole, Mail, MapPin, Mic, RefreshCcw, Search, Users, TrendingUp
+  ArrowRight, Award, FileDown, FileText, Globe, Headphones, LayoutDashboard, LogOut,
+  LockKeyhole, Mail, MapPin, Mic, Pause, Play, Download, Printer, RefreshCcw, Search, Users, TrendingUp
 } from 'lucide-react';
 import { api } from './api.js';
 import './styles.css';
 
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+
+// ---------- CSV / PDF export helpers ----------
+const csvEscape = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const downloadCSV = (name, rows) => {
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function ExportBar({ rows, filename }) {
+  return (
+    <div className="admin-export">
+      <button className="admin-export-btn" onClick={() => downloadCSV(filename, rows)} title="Download CSV"><FileDown size={14} /> CSV</button>
+      <button className="admin-export-btn" onClick={() => window.print()} title="Print / Save as PDF"><Printer size={14} /> PDF</button>
+    </div>
+  );
+}
+
+// ---------- audio play + download ----------
+function AudioCell({ url }) {
+  const [playing, setPlaying] = useState(false);
+  const ref = useRef(null);
+  if (!url) return <span className="admin-muted">—</span>;
+  const toggle = () => {
+    if (!ref.current) {
+      ref.current = new Audio(url);
+      ref.current.onended = () => setPlaying(false);
+    }
+    if (playing) { ref.current.pause(); setPlaying(false); }
+    else { ref.current.play(); setPlaying(true); }
+  };
+  return (
+    <div className="admin-audio">
+      <button className="admin-mini-btn play" onClick={toggle} title={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={13} /> : <Play size={13} />}</button>
+      <a className="admin-mini-btn" href={url} download="nuji-recording.webm" title="Download audio"><Download size={13} /></a>
+    </div>
+  );
+}
 
 function Field({ label, children }) { return <label className="form-field"><span>{label}</span>{children}</label> }
 
@@ -55,9 +97,7 @@ function Admin() {
     <section className="admin-page"><div className="admin-shell">
       <div className="admin-aside"><div><div className="eyebrow">Nuji operations</div><h1>Keep every voice<br /><em>moving forward.</em></h1><p>Secure access for Nuji dataset administrators and community operations teams.</p></div><span>© 2026 Nuji · Internal platform</span></div>
       <div className="admin-login">
-        <div className="admin-mobile-logo">
-  <img src="/assets/nuji-logo.png" alt="Nuji" className="brand-mark" />
-</div>
+        <div className="admin-mobile-logo"><span className="brand-mark">N</span></div>
         <div className="admin-copy"><div className="eyebrow ink">Admin portal</div><h2>Welcome back.</h2><p>Sign in to manage contributions and community quality.</p></div>
         <form onSubmit={login}>
           <Field label="Work email"><span className="input-icon"><Mail size={18} /><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@nuji.ng" required /></span></Field>
@@ -80,6 +120,20 @@ function Admin() {
     !query || [u.nickname, u.phone, u.state, u.lga, u.gender, u.kind].join(' ').toLowerCase().includes(query.toLowerCase())
   );
 
+  // export row builders
+  const userRows = [
+    ['Phone', 'Nickname', 'State', 'LGA', 'Age range', 'Gender', 'Languages spoken', 'Contributing in', 'Type', 'Points', 'Submissions', 'Reviews', 'Best streak', 'Ref code', 'Referred by', 'Joined'],
+    ...(data.allUsers || []).map(u => [u.phone, u.nickname, u.state, u.lga, u.age, u.gender, (u.languages || []).join(' | '), u.contributionLang, u.kind, u.points, u.subs, u.reviews, u.bestStreak, u.refCode, u.referredBy, fmtDate(u.createdAt)])
+  ];
+  const contribRows = [
+    ['Date', 'Time', 'Phone', 'Language', 'Prompt', 'Response', 'Has voice', 'Audio URL', 'Reviews', 'Points'],
+    ...data.recentContribs.map(c => [fmtDate(c.createdAt), fmtTime(c.createdAt), c.phone, c.language, c.prompt, c.text, c.hasAudio ? 'yes' : 'no', c.audioUrl || '', c.reviews, c.points])
+  ];
+  const stateRows = [
+    ['Rank', 'State', 'Zone', 'Contributors', 'Submissions', 'Points'],
+    ...data.topStates.map((s, i) => [i + 1, s.name, s.zone, s.contributors, s.submissions, s.points])
+  ];
+
   const KPIS = [
     { icon: <Users size={18} />, label: 'Total users', value: t.users, tone: 'green' },
     { icon: <Award size={18} />, label: 'Full profiles', value: t.profiles, tone: 'gold' },
@@ -95,7 +149,7 @@ function Admin() {
     <div className="admin-app">
       {/* ---------- sidebar (desktop) ---------- */}
       <aside className="admin-side">
-  <div className="admin-side-brand">
+       <div className="admin-side-brand">
   <img src="/assets/nuji-logo.png" alt="Nuji" className="brand-mark" />
   <span>nuji <b>admin</b></span>
 </div>
@@ -190,6 +244,7 @@ function Admin() {
                     <span className={`admin-dot ${c.hasAudio ? 'audio' : ''}`}>{c.hasAudio ? '🎙️' : '✍️'}</span>
                     <b>{c.language}</b>
                     <small className="admin-ellipsis">{c.text || c.prompt}</small>
+                    {c.hasAudio && <AudioCell url={c.audioUrl} />}
                     <strong>+{c.points}</strong>
                   </div>
                 ))}
@@ -214,7 +269,13 @@ function Admin() {
         {/* ================= CONTRIBUTIONS ================= */}
         {tab === 'contributions' && <div className="admin-content">
           <div className="admin-panel">
-            <div className="admin-panel-head"><h3>All recent contributions</h3><span className="admin-count">{data.recentContribs.length} shown</span></div>
+            <div className="admin-panel-head">
+              <h3>All recent contributions</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="admin-count">{data.recentContribs.length} shown</span>
+                <ExportBar rows={contribRows} filename="nuji-contributions.csv" />
+              </div>
+            </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead><tr><th>When</th><th>Phone</th><th>Lang</th><th>Response / prompt</th><th>Voice</th><th>Reviews</th><th>Pts</th></tr></thead>
@@ -225,7 +286,7 @@ function Admin() {
                       <td className="admin-nowrap">{c.phone}</td>
                       <td><span className="admin-chip">{c.language}</span></td>
                       <td className="admin-cell-text">{c.text || c.prompt}</td>
-                      <td>{c.hasAudio ? '🎙️' : '—'}</td>
+                      <td><AudioCell url={c.audioUrl} /></td>
                       <td>{c.reviews}/3</td>
                       <td><b>+{c.points}</b></td>
                     </tr>
@@ -236,12 +297,15 @@ function Admin() {
           </div>
         </div>}
 
-        {/* ================= USERS (full registration data) ================= */}
+        {/* ================= USERS ================= */}
         {tab === 'users' && <div className="admin-content">
           <div className="admin-panel">
             <div className="admin-panel-head">
               <h3>Registered users</h3>
-              <span className="admin-count">{filteredUsers.length} of {(data.allUsers || []).length}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="admin-count">{filteredUsers.length} of {(data.allUsers || []).length}</span>
+                <ExportBar rows={userRows} filename="nuji-users.csv" />
+              </div>
             </div>
             <div className="admin-search">
               <Search size={16} />
@@ -291,7 +355,10 @@ function Admin() {
         {/* ================= STATES ================= */}
         {tab === 'states' && <div className="admin-content">
           <div className="admin-panel">
-            <div className="admin-panel-head"><h3>State vs State — live standings</h3></div>
+            <div className="admin-panel-head">
+              <h3>State vs State — live standings</h3>
+              <ExportBar rows={stateRows} filename="nuji-states.csv" />
+            </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead><tr><th>#</th><th>State</th><th>Zone</th><th>Contributors</th><th>Submissions</th><th>Points</th></tr></thead>
