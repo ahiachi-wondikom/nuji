@@ -1,9 +1,17 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The dev server proxies /api and /uploads to the Express backend on port 4000
+// Multi-page build: index.html (public site) + admin.html (admin portal)
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        admin: 'admin.html'
+      }
+    }
+  },
   server: {
     host: true,
     port: 5173,
