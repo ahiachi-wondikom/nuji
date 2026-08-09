@@ -253,6 +253,88 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+// ================= ADMIN (token-protected) =================
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@nuji.ng';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'nuji-admin-2026';
+const SECRET = process.env.ADMIN_SECRET || 'nuji-dev-secret';
+
+const signToken = (payload) => {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+};
+const verifyToken = (token) => {
+  try {
+    const [body, sig] = String(token).split('.');
+    const expect = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
+    if (sig !== expect) return null;
+    const p = JSON.parse(Buffer.from(body, 'base64url').toString());
+    return p.exp > Date.now() ? p : null;
+  } catch { return null; }
+};
+
+app.post('/api/admin/login', (req, res) => {
+  const { email, password } = req.body || {};
+  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+    return res.json({ token: signToken({ exp: Date.now() + 12 * 3600 * 1000 }) });
+  }
+  res.status(401).json({ error: 'Invalid email or password' });
+});
+
+const requireAdmin = (req, res, next) => {
+  const h = req.headers.authorization || '';
+  if (!verifyToken(h.startsWith('Bearer ') ? h.slice(7) : '')) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+};
+
+const subsOf = (u) => (u.subs ? (u.subs.text || 0) + (u.subs.voice || 0) + (u.subs.both || 0) : 0);
+
+app.get('/api/admin/overview', requireAdmin, (req, res) => {
+  const db = getDB();
+  const U = Object.values(db.users), C = [...db.contributions].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 500);
+  const dayMs = 86400000, now = Date.now();
+  const byLang = {}, byDay = {};
+  for (const c of C) {
+    byLang[c.language] = (byLang[c.language] || 0) + 1;
+    const d = (c.createdAt || '').slice(0, 10);
+    if (d) byDay[d] = (byDay[d] || 0) + 1;
+  }
+  const last14 = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(now - (13 - i) * dayMs).toISOString().slice(0, 10);
+    return { date: d, count: byDay[d] || 0 };
+  });
+  const statesAgg = {};
+  for (const u of U) {
+    if (!u.state) continue;
+    const s = statesAgg[u.state] = statesAgg[u.state] || { name: u.state, zone: STATE_ZONES[u.state] || '—', points: 0, contributors: 0, submissions: 0 };
+    s.points += u.points || 0; s.contributors += 1; s.submissions += subsOf(u);
+  }
+  res.json({
+    totals: {
+      users: U.length,
+      profiles: U.filter(u => u.profileKind === 'full').length,
+      quick: U.filter(u => u.profileKind === 'quick').length,
+      contributions: db.contributions.length,
+      audio: db.contributions.filter(c => c.audioUrl).length,
+      textOnly: db.contributions.filter(c => !c.audioUrl && c.text).length,
+      reviews: db.contributions.reduce((s, c) => s + (c.reviews || []).length, 0),
+      pointsIssued: U.reduce((s, u) => s + (u.points || 0), 0),
+      signups7: U.filter(u => u.createdAt && now - new Date(u.createdAt).getTime() < 7 * dayMs).length
+    },
+    byLang, last14,
+    topUsers: [...U].sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 10)
+      .map(u => ({ name: u.nickname || 'Anonymous', phone: u.phone, state: u.state || '—', points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0 })),
+    recentUsers: [...U].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10)
+      .map(u => ({ phone: u.phone, nickname: u.nickname || '—', state: u.state || '—', kind: u.profileKind || 'none', points: u.points || 0, createdAt: u.createdAt })),
+    recentContribs: C.slice(0, 20).map(c => ({
+      id: c.id, phone: c.phone || 'guest', language: c.language, prompt: c.prompt || '',
+      text: (c.text || '').slice(0, 90), hasAudio: !!c.audioUrl, points: c.points || 0,
+      reviews: (c.reviews || []).length, createdAt: c.createdAt
+    })),
+    topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10)
+  });
+});
+
 // ================= START =================
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Nuji API running on http://localhost:${PORT}`));
