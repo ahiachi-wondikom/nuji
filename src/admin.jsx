@@ -55,7 +55,9 @@ function Admin() {
     <section className="admin-page"><div className="admin-shell">
       <div className="admin-aside"><div><div className="eyebrow">Nuji operations</div><h1>Keep every voice<br /><em>moving forward.</em></h1><p>Secure access for Nuji dataset administrators and community operations teams.</p></div><span>© 2026 Nuji · Internal platform</span></div>
       <div className="admin-login">
-        <div className="admin-mobile-logo"><span className="brand-mark">N</span></div>
+        <div className="admin-mobile-logo">
+  <img src="/assets/nuji-logo.png" alt="Nuji" className="brand-mark" />
+</div>
         <div className="admin-copy"><div className="eyebrow ink">Admin portal</div><h2>Welcome back.</h2><p>Sign in to manage contributions and community quality.</p></div>
         <form onSubmit={login}>
           <Field label="Work email"><span className="input-icon"><Mail size={18} /><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@nuji.ng" required /></span></Field>
@@ -93,7 +95,10 @@ function Admin() {
     <div className="admin-app">
       {/* ---------- sidebar (desktop) ---------- */}
       <aside className="admin-side">
-        <div className="admin-side-brand"><span className="brand-mark">N</span><span>nuji <b>admin</b></span></div>
+  <div className="admin-side-brand">
+  <img src="/assets/nuji-logo.png" alt="Nuji" className="brand-mark" />
+  <span>nuji <b>admin</b></span>
+</div>
         <nav className="admin-side-nav">
           {TABS.map(x => (
             <button key={x.id} className={tab === x.id ? 'admin-nav-btn active' : 'admin-nav-btn'} onClick={() => setTab(x.id)}>
