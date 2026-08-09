@@ -117,7 +117,7 @@
 
 .profile-page{position:relative;padding:56px 0 96px;background:#f2f5ec;min-height:calc(100vh - 72px)}.profile-back{margin-bottom:18px}.profile-hero-card{background:linear-gradient(150deg,#0f2a1c,#1c4530);border-radius:22px;padding:30px 32px;color:#fff;box-shadow:var(--shadow)}.profile-hero-id{display:flex;align-items:center;gap:16px}.profile-avatar-large{width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.14);display:grid;place-items:center;flex:none}.profile-hero-label{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#bcd8c7;font-weight:700}.profile-hero-card h1{font-size:30px;margin:4px 0 0;letter-spacing:-1px}
 .profile-hero-top{display:flex;align-items:center;justify-content:space-between;gap:14px}
-.logout-btn{min-height:40px;border-radius:10px;padding:0 14px;flex:none;font-size:13px}.profile-pills{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.profile-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;color:#eafaf0}.profile-pill svg{color:#e8ae3c}.profile-level-card{margin-top:16px;background:#e7f3ea;border:1px solid #cfe8d8;border-radius:16px;padding:18px 20px;display:flex;align-items:center;gap:16px}.profile-level-icon{width:44px;height:44px;border-radius:12px;background:var(--coral);color:#fff;display:grid;place-items:center;flex:none}.profile-level-body{flex:1}.profile-level-row{display:flex;justify-content:space-between;font-size:14px;color:var(--ink);margin-bottom:8px}.profile-tabs{display:flex;gap:6px;margin-top:26px;border-bottom:1px solid var(--line)}.profile-tab{border:0;background:transparent;padding:12px 6px;margin-right:20px;color:#7b8878;font-weight:700;font-size:14px;position:relative}.profile-tab.active{color:var(--ink)}.profile-tab.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--coral)}.profile-panel{margin-top:26px}.overview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.overview-card{background:#fffdf8;border:1px solid var(--line);border-radius:16px;padding:22px 18px;display:flex;flex-direction:column;gap:10px}.overview-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:#fff}.overview-card strong{font-family:'Source Serif 4',Georgia,serif;font-size:28px;letter-spacing:-1px}.overview-card span{font-size:13px;color:#5c6b62;font-weight:600}.overview-card.tone-green .overview-icon{background:var(--coral)}.overview-card.tone-blue .overview-icon{background:#2f6fed}.overview-card.tone-purple .overview-icon{background:var(--berry)}.overview-card.tone-gold .overview-icon{background:var(--gold)}.overview-card.tone-pink .overview-icon{background:#d1477a}.overview-card.tone-teal .overview-icon{background:#1f8d6e}.activity-card{background:#fffdf8;border:1px solid var(--line);border-radius:16px;padding:24px}.activity-card h3{font-size:19px;margin:0}.activity-sub{color:#5c6b62;font-size:13px;margin:6px 0 0}
+.logout-btn{min-height:40px;border-radius:10px;padding:0 14px;flex:none;font-size:13px}.profile-pills{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}.profile-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;color:#eafaf0}.profile-pill svg{color:#e8ae3c}.profile-level-card{margin-top:16px;background:#e7f3ea;border:1px solid #cfe8d8;border-radius:16px;padding:18px 20px;display:flex;align-items:center;gap:16px}.profile-level-icon{width:44px;height:44px;border-radius:12px;background:var(--coral);color:#fff;display:grid;place-items:center;flex:none}.profile-level-body{flex:1}.profile-level-row{display:flex;justify-content:space-between;font-size:14px;color:var(--ink);margin-bottom:8px}.profile-tabs{display:flex;gap:6px;margin-top:26px;border-bottom:1px solid var(--line)}.profile-tab{border:0;background:transparent;padding:12px 6px;margin-right:20px;color:#7b8878;font-weight:700;font-size:14px;position:relative}.profile-tab.active{color:var(--ink)}.profile-tab.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--coral)}.profile-panel{margin-top:26px}.overview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.overview-card{background:#fffdf8;border:1px solid var(--line);border-radius:16px;padding:22px 18px;display:flex;flex-direction:column;gap:10px}.overview-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:#fff}.overview-card strong{font-family:'Source Serif 4',Georgia,serif;font-size:28px;letter-spacing:-1px}.overview-card span{font-size:13px;color:#5c6b62;font-weight:600}.overview-card.tone-green .overview-icon{background:var(--coral)}.overview-card.tone-blue .overview-icon{background:#2f6fed}.overview-card.tone-purple .overview-icon{background:var(--berry)}.overview-card.tone-gold .overview-icon{background:var(--gold)}.overview-card.tone-pink .overview-icon{background:#d1477a}.overview-card.tone-teal .overview-icon{background:var(--green)}.activity-card{background:#fffdf8;border:1px solid var(--line);border-radius:16px;padding:24px}.activity-card h3{font-size:19px;margin:0}.activity-sub{color:#5c6b62;font-size:13px;margin:6px 0 0}
 
 /* ===== GITHUB-STYLE CONTRIBUTION GRAPH ===== */
 .activity-months{display:flex;justify-content:space-between;margin:22px 1px 8px;color:#8b9587;font-size:11px;font-weight:600}
@@ -272,3 +272,35 @@
 .invite-continue{width:100%;margin-top:10px}
 
 @media(max-width:620px){.points-breakdown-card,.invite-card{padding:18px}}
+
+/* ===== ADMIN PRO FINISH — layered gradients & exports ===== */
+.admin-app{background:radial-gradient(1100px 420px at 85% -10%,rgba(0,135,81,.10),transparent 60%),radial-gradient(900px 380px at -10% 15%,rgba(232,174,60,.12),transparent 60%),radial-gradient(700px 300px at 50% 110%,rgba(141,60,113,.07),transparent 60%),linear-gradient(180deg,#f8f9f5,#edf0e8)}
+.admin-side{background:linear-gradient(180deg,#0b241a,#123a2a 55%,#0b241a);box-shadow:inset -1px 0 0 rgba(255,255,255,.06)}
+.admin-side:before{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(300px 200px at 20% 0%,rgba(232,174,60,.16),transparent 60%),radial-gradient(300px 260px at 90% 100%,rgba(31,141,110,.20),transparent 60%)}
+.admin-side>*{position:relative}
+.admin-panel{background:linear-gradient(180deg,#ffffff,#fcfdfa);box-shadow:0 1px 2px rgba(15,42,28,.05),0 8px 24px rgba(15,42,28,.05)}
+.admin-panel-head h3{position:relative;padding-left:12px}
+.admin-panel-head h3:before{content:'';position:absolute;left:0;top:2px;bottom:2px;width:4px;border-radius:4px;background:linear-gradient(180deg,var(--gold),var(--coral))}
+.admin-kpi{background:linear-gradient(180deg,#ffffff,#fbfcf8);overflow:hidden}
+.admin-kpi:before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.admin-kpi.green:before{background:linear-gradient(90deg,var(--green),var(--coral))}
+.admin-kpi.gold:before{background:linear-gradient(90deg,#f2c063,var(--gold))}
+.admin-kpi.berry:before{background:linear-gradient(90deg,#b06093,var(--berry))}
+.admin-kpi.blue:before{background:linear-gradient(90deg,#5b8cf2,#2f6fed)}
+.admin-user-card{background:linear-gradient(180deg,#ffffff,#fbfcf8)}
+.admin-export{display:flex;gap:6px}
+.admin-export-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 11px;font-size:12px;font-weight:800;color:#41504a;cursor:pointer;transition:.15s}
+.admin-export-btn:hover{background:var(--ink);border-color:var(--ink);color:#fff}
+.admin-audio{display:flex;align-items:center;gap:6px}
+.admin-mini-btn{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);display:grid;place-items:center;cursor:pointer;text-decoration:none;transition:.15s}
+.admin-mini-btn:hover{background:var(--coral);border-color:var(--coral);color:#fff}
+.admin-mini-btn.play{background:var(--ink);border-color:var(--ink);color:#fff}
+.admin-muted{color:#9aa39b}
+.admin-dot.audio{background:linear-gradient(135deg,#dceee7,#f9edcf)}
+@media print{
+  .admin-side,.admin-mobile-tabs,.admin-top-actions,.admin-export,.admin-search,.admin-mini-btn,.admin-link{display:none!important}
+  .admin-app{background:#fff}
+  .admin-main{padding:0}
+  .admin-panel,.admin-kpi,.admin-user-card{box-shadow:none;border:1px solid #ddd}
+  .admin-table-wrap{overflow:visible}
+}
