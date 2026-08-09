@@ -328,7 +328,8 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       .map(u => ({ phone: u.phone, nickname: u.nickname || '—', state: u.state || '—', kind: u.profileKind || 'none', points: u.points || 0, createdAt: u.createdAt })),
     recentContribs: C.slice(0, 20).map(c => ({
       id: c.id, phone: c.phone || 'guest', language: c.language, prompt: c.prompt || '',
-      text: (c.text || '').slice(0, 90), hasAudio: !!c.audioUrl, points: c.points || 0,
+      text: (c.text || '').slice(0, 90), hasAudio: !!c.audioUrl, audioUrl: c.audioUrl || null,
+      points: c.points || 0,
       reviews: (c.reviews || []).length, createdAt: c.createdAt
     })),
     topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
