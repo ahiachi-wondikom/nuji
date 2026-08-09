@@ -1,9 +1,15 @@
-# Netlify config for the Nuji SPA
+# Netlify config for the Nuji SPA + separate admin page
 [build]
   command = "npm run build"
   publish = "dist"
 
-# Send every route to index.html so refresh/deep-links work (React handles the path)
+# The admin portal is its own page
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+
+# Every other route goes to the public SPA (React handles the path)
 [[redirects]]
   from = "/*"
   to = "/index.html"
