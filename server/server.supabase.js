@@ -362,7 +362,14 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
         text: (c.text || '').slice(0, 90), hasAudio: !!c.audio_url, points: c.points || 0,
         reviews: (c.reviews || []).length, createdAt: c.created_at
       })),
-      topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10)
+      topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
+      allUsers: [...U].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 200).map(u => ({
+        phone: u.phone, nickname: u.nickname || '', state: u.state || '', lga: u.lga || '', age: u.age || '',
+        gender: u.gender || '', languages: u.languages || [], contributionLang: u.contribution_lang || 'Igbo',
+        kind: u.profile_kind || 'none', refCode: u.ref_code || '', referredBy: u.referred_by || '',
+        points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0, streak: u.streak || 0,
+        bestStreak: u.best_streak || 0, createdAt: u.created_at || ''
+      }))
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
