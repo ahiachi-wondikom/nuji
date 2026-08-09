@@ -331,7 +331,14 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       text: (c.text || '').slice(0, 90), hasAudio: !!c.audioUrl, points: c.points || 0,
       reviews: (c.reviews || []).length, createdAt: c.createdAt
     })),
-    topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10)
+    topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
+    allUsers: [...U].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 200).map(u => ({
+      phone: u.phone, nickname: u.nickname || '', state: u.state || '', lga: u.lga || '', age: u.age || '',
+      gender: u.gender || '', languages: u.languages || [], contributionLang: u.contributionLang || 'Igbo',
+      kind: u.profileKind || 'none', refCode: u.refCode || '', referredBy: u.referredBy || '',
+      points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0, streak: u.streak || 0,
+      bestStreak: u.bestStreak || 0, createdAt: u.createdAt || ''
+    }))
   });
 });
 
