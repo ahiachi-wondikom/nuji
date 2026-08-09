@@ -43,5 +43,9 @@ export const api = {
   // ---- public data ----
   leaderboard: () => get('/leaderboard'),
   states: () => get('/states'),
-  stats: () => get('/stats')
+  stats: () => get('/stats'),
+
+  // ---- admin (token-protected) ----
+  adminLogin: (email, password) => post('/admin/login', { email, password }),
+  adminOverview: () => get('/admin/overview')
 };
