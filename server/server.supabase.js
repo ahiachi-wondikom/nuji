@@ -8,13 +8,14 @@ import cors from 'cors';
 import multer from 'multer';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import {
   POINT_RULES, levelInfo, totalSubs, BADGES, earnedBadges,
   activityPayload, bumpDay, topLanguage, STATE_ZONES
 } from './db.js';
 import { getPrompt, allPrompts } from './prompts.js';
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, { realtime: { transport: ws } });
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -169,9 +170,9 @@ app.get('/api/profile/:phone', async (req, res) => {
 app.get('/api/prompts', async (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
-  const { count } = await supabase.from('prompts').select('*', { count: 'exact', head: true }).eq('language', language);
+  const { count } = await supabase.from('prompts').select('*', { count: 'exact', head: true }).eq('language', language).eq('is_active', true);
   if (count) {
-    const { data } = await supabase.from('prompts').select('text').eq('language', language).order('id').range(seed % count, seed % count);
+    const { data } = await supabase.from('prompts').select('text').eq('language', language).eq('is_active', true).order('id').range(seed % count, seed % count);
     if (data && data[0]) return res.json({ text: data[0].text, language });
   }
   res.json({ text: getPrompt(language, seed), language });
@@ -415,7 +416,7 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
         gender: u.gender || '', languages: u.languages || [], contributionLang: u.contribution_lang || 'Igbo',
         kind: u.profile_kind || 'none', refCode: u.ref_code || '', referredBy: u.referred_by || '',
         points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0, streak: u.streak || 0,
-        bestStreak: u.best_streak || 0, createdAt: u.created_at || ''
+        bestStreak: u.best_streak || 0, badgesEarned: earnedBadges(toUser(u)).length, createdAt: u.created_at || ''
       }))
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -432,13 +433,94 @@ app.post('/api/admin/status', requireAdmin, async (req, res) => {
 
 // admin: save translation / annotation from the review console
 app.post('/api/admin/meta', requireAdmin, async (req, res) => {
-  const { id, translation, annotation } = req.body || {};
+  const { id, translation, annotation, annotationStatus } = req.body || {};
   const patch = {};
   if (typeof translation === 'string') patch.translation = translation;
   if (typeof annotation === 'string') patch.annotation = annotation;
+  if (typeof annotationStatus === 'string') patch.annotation_status = annotationStatus;
   const { error } = await supabase.from('contributions').update(patch).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// ================= ADMIN: ANALYTICS =================
+app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
+  try {
+    const [uRes, cRes] = await Promise.all([
+      supabase.from('users').select('*'),
+      supabase.from('contributions').select('*').limit(1000)
+    ]);
+    const U = uRes.data || [], C = cRes.data || [];
+    const langCounts = {}, stateCounts = {}, genderDist = {}, byDay = {};
+    let codeSwitch = 0, approved = 0, pending = 0, flagged = 0, audio = 0;
+    const dayMs = 86400000, now = Date.now();
+    for (const c of C) {
+      langCounts[c.language] = (langCounts[c.language] || 0) + 1;
+      if ((c.langs || []).length > 1) codeSwitch++;
+      if (c.audio_url) audio++;
+      const st = c.status || 'pending';
+      if (st === 'approved') approved++; else if (st === 'flagged') flagged++; else pending++;
+      const d = (c.created_at || '').slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1;
+    }
+    const lastByUser = {};
+    for (const c of C) if (c.phone) { const d = c.created_at || ''; if (!lastByUser[c.phone] || d > lastByUser[c.phone]) lastByUser[c.phone] = d; }
+    for (const u of U) {
+      if (u.state) stateCounts[u.state] = (stateCounts[u.state] || 0) + 1;
+      genderDist[u.gender || 'Unknown'] = (genderDist[u.gender || 'Unknown'] || 0) + 1;
+    }
+    const growthByDay = Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(now - (29 - i) * dayMs).toISOString().slice(0, 10);
+      return { date: d, count: byDay[d] || 0 };
+    });
+    const oldUsers = U.filter(u => u.created_at && now - new Date(u.created_at).getTime() >= 7 * dayMs);
+    const stillActive = oldUsers.filter(u => lastByUser[u.phone] && now - new Date(lastByUser[u.phone]).getTime() <= 7 * dayMs).length;
+    res.json({
+      langCounts, stateCounts, genderDistribution: genderDist, growthByDay,
+      totalSubmissions: C.length, approved, pending, flagged, audio,
+      totalContributors: U.length,
+      approvalRate: C.length ? Math.round(approved / C.length * 100) : 0,
+      flagRate: C.length ? Math.round(flagged / C.length * 100) : 0,
+      codeSwitchRate: C.length ? Math.round(codeSwitch / C.length * 100) : 0,
+      retention: { week1Total: oldUsers.length, stillActive, retentionRate: oldUsers.length ? Math.round(stillActive / oldUsers.length * 100) : 0 }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ================= ADMIN: PROMPTS MANAGER =================
+app.get('/api/admin/prompts', requireAdmin, async (req, res) => {
+  const { data } = await supabase.from('prompts').select('*').order('id', { ascending: false }).limit(300);
+  res.json(data || []);
+});
+app.post('/api/admin/prompts', requireAdmin, async (req, res) => {
+  const { text, language } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'Text required' });
+  const { error } = await supabase.from('prompts').insert({ text: text.trim(), language: language || 'Igbo', is_active: true });
+  res.json({ ok: !error, error });
+});
+app.post('/api/admin/prompts/bulk', requireAdmin, async (req, res) => {
+  const { lines = [], language = 'Igbo' } = req.body || {};
+  const rows = lines.map(l => String(l || '').trim()).filter(l => l.length > 3).map(t => ({ text: t, language, is_active: true }));
+  if (!rows.length) return res.status(400).json({ error: 'No valid lines' });
+  const { error } = await supabase.from('prompts').insert(rows);
+  res.json({ ok: !error, count: rows.length, error });
+});
+app.post('/api/admin/prompts/delete', requireAdmin, async (req, res) => {
+  const { error } = await supabase.from('prompts').delete().eq('id', (req.body || {}).id);
+  res.json({ ok: !error });
+});
+app.post('/api/admin/prompts/toggle', requireAdmin, async (req, res) => {
+  const { id } = req.body || {};
+  const { data } = await supabase.from('prompts').select('is_active').eq('id', id).maybeSingle();
+  if (!data) return res.status(404).json({ error: 'Not found' });
+  const { error } = await supabase.from('prompts').update({ is_active: !data.is_active }).eq('id', id);
+  res.json({ ok: !error });
+});
+
+// ================= ADMIN: ANNOTATION QUEUE =================
+app.get('/api/admin/annotate-queue', requireAdmin, async (req, res) => {
+  const { data } = await supabase.from('contributions').select('*').order('created_at', { ascending: false }).limit(500);
+  const q = (data || []).filter(c => (c.langs || []).length > 1 && (c.annotation_status || 'pending') === 'pending');
+  res.json(q.slice(0, 50));
 });
 
 // ---------------- start + auto-seed prompts ----------------
