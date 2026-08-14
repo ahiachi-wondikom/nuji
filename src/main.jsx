@@ -47,6 +47,38 @@ const normalizeNaija = (p) => {
 };
 const validNaijaPhone = (p) => /^0(70|80|81|90|91|93)\d{8}$/.test(p);
 
+// ---------- audio quality validation (runs in the browser before upload) ----------
+async function analyzeAudio(blob) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const ch = buf.getChannelData(0);
+    let sum = 0, zc = 0, prev = 0, n = 0;
+    const step = Math.max(1, Math.floor(ch.length / 60000));
+    for (let i = 0; i < ch.length; i += step) { const v = ch[i]; sum += v * v; if ((v >= 0) !== (prev >= 0)) zc++; prev = v; n++; }
+    const rms = Math.sqrt(sum / (n || 1));
+    const zcr = zc / (n || 1);
+    ctx.close();
+    return { duration: buf.duration, rms, zcr };
+  } catch { return null; }
+}
+// industry-style heuristics: too short / silent mic / extreme noise
+function audioProblems(m) {
+  if (!m) return [];
+  const p = [];
+  if (m.duration < 3) p.push('too_short');
+  if (m.rms < 0.004) p.push('silent');
+  if (m.rms > 0.35 || m.zcr > 0.5) p.push('noisy');
+  return p;
+}
+const AUDIO_ERROR_MSG = {
+  too_short: 'Recording is under 3 seconds — speak a little longer and try again.',
+  silent: 'No voice detected (silent recording). Check your microphone and try again.',
+  noisy: 'Extreme background noise detected. Move to a quieter spot and try again.'
+};
+const fmtDur = (s) => `0:${String(Math.max(0, Math.round(s))).padStart(2, '0')}`;
+
 // ---------- cookie session helpers ----------
 const getCookie = () => { const m = document.cookie.match(/(?:^|; )nuji_phone=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };
 const setCookie = (v) => { document.cookie = `nuji_phone=${encodeURIComponent(v)}; path=/; max-age=31536000; SameSite=Lax`; };
@@ -237,7 +269,7 @@ function Home({ navigate, language, setLanguage }) {
           <div className="eyebrow"><span className="pulse-dot"/> Made with voices across Nigeria</div>
           <h1>Technology that <em>understands</em> home.</h1>
           <p>Help build voice data in the languages Nigerians actually use — at the market, with family, and everywhere in between.</p>
-          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate('join')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
+          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate('contribute')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
           <div className="hero-note"><span className="avatars"><i>A</i><i>C</i><i>T</i></span><span>Join people making language visible.</span></div>
         </div>
         <div className="sound-stage" aria-label="Example recording contribution">
@@ -826,6 +858,9 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   const [earnedPoints, setEarnedPoints] = useState(0);
   const [count, setCount] = useState(1);
   const [audioBlob, setAudioBlob] = useState(null);
+  const [audioMeta, setAudioMeta] = useState(null);
+  const [audioError, setAudioError] = useState('');
+  const [submitError, setSubmitError] = useState('');
   const [promptText, setPromptText] = useState(language.sample);
   const recRef = useRef(null);
   const blobUrlRef = useRef(null);
@@ -853,14 +888,26 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
       const rec = new MediaRecorder(stream);
       const chunks = [];
       rec.ondataavailable = e => chunks.push(e.data);
-      rec.onstop = () => { setAudioBlob(new Blob(chunks, { type: rec.mimeType || 'audio/webm' })); stream.getTracks().forEach(t => t.stop()); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+        const meta = await analyzeAudio(blob);
+        const probs = audioProblems(meta);
+        if (probs.length) {
+          // automatic rejection — bad audio never reaches the database
+          setAudioError(AUDIO_ERROR_MSG[probs[0]]);
+          setAudioBlob(null); setAudioMeta(null); setRecStage('idle');
+        } else {
+          setAudioError(''); setAudioMeta(meta); setAudioBlob(blob); setRecStage('recorded');
+        }
+      };
       recRef.current = rec;
       rec.start();
     } catch { recRef.current = null; }
   };
   const stopRecording = () => { if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop(); setRecStage('recorded'); };
   const reRecord = () => {
-    setTime(0); setRecStage('idle'); setAudioBlob(null); setIsPlaying(false);
+    setTime(0); setRecStage('idle'); setAudioBlob(null); setAudioMeta(null); setAudioError(''); setIsPlaying(false);
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null; }
   };
   const fmt = (n) => `00:${String(n).padStart(2,'0')}`;
@@ -875,17 +922,24 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   };
 
   const submit = async () => {
-    const data = { phone: phone || undefined, language: language.name, text: textResponse, translation, langs: selectedLangs, formality, prompt: promptText };
+    setSubmitError('');
+    const data = { phone: phone || undefined, language: language.name, text: textResponse, translation, langs: selectedLangs, formality, prompt: promptText, duration: audioMeta ? audioMeta.duration : 0 };
     let result = null;
     if (audioBlob) {
       const fd = new FormData();
       fd.append('audio', audioBlob, 'recording.webm');
       fd.append('data', JSON.stringify(data));
-      result = await api.submitContributionWithAudio(fd);
+      result = await api.trySubmitAudio(fd);
     } else {
-      result = await api.submitContribution(data);
+      result = await api.trySubmit(data);
     }
-    setEarnedPoints(result ? result.earned : totalPoints);
+    if (!result || !result.ok) {
+      if (result && result.error === 'duplicate') setSubmitError('This response is identical (or nearly identical) to one you already submitted — please say something new.');
+      else if (result && result.error === 'too_short') setSubmitError(AUDIO_ERROR_MSG.too_short);
+      else setSubmitError('Something went wrong while saving — please try again.');
+      return;
+    }
+    setEarnedPoints(result.earned || totalPoints);
     setSubmitted(true);
     refreshProfile();
   };
@@ -893,7 +947,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   const nextSentence = () => {
     setCount(c => c + 1); setTextResponse(''); setRecStage('idle'); setTime(0);
     setSelectedLangs([]); setTranslation(''); setFormality('Normal'); setSubmitted(false);
-    setAudioBlob(null); setIsPlaying(false); blobUrlRef.current = null;
+    setAudioBlob(null); setAudioMeta(null); setAudioError(''); setSubmitError(''); setIsPlaying(false); blobUrlRef.current = null;
   };
 
   return <section className="task-page wave-bg slim-wave"><div className="container task-layout">
@@ -927,6 +981,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
           <div className="contribute-step">
             <div className="contribute-step-head"><span className="step-num">2</span><h3>Record your voice</h3></div>
             {recStage === 'idle' && <button className="btn btn-secondary voice-start-btn" onClick={startRecording}><Mic size={17}/> Tap the microphone to start recording</button>}
+            {audioError && <p className="task-help" style={{ color: '#c0392b', fontWeight: 700 }}>⚠️ {audioError}</p>}
             {recStage === 'recording' && <div className="inline-recorder">
               <div className="recording-header"><span className="record-status large"><i/> Recording</span><span>{fmt(time)}</span></div>
               <div className="big-waveform">{Array.from({length:31},(_,i) => <b key={i} style={{height: `${16 + Math.abs(Math.sin(i*.8+time))*54}px`}}/>)}</div>
@@ -934,7 +989,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
               <p className="record-instruction">Tap when you’ve finished speaking</p>
             </div>}
             {recStage === 'recorded' && <div className="inline-recorder">
-              <div className="review-player"><button className="round-play dark" onClick={playRecording} aria-label={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}</button><div className="player-line"><i style={{width: isPlaying ? '66%' : '24%'}}/></div><span>00:{String(Math.max(time,3)).padStart(2,'0')}</span></div>
+              <div className="review-player"><button className="round-play dark" onClick={playRecording} aria-label={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}</button><div className="player-line"><i style={{width: isPlaying ? '66%' : '24%'}}/></div><span>{audioMeta ? `${fmtDur(audioMeta.duration)} ✓ quality ok` : `00:${String(Math.max(time,3)).padStart(2,'0')}`}</span></div>
               <button className="text-action small" onClick={reRecord}><RotateCcw size={15}/> Record again</button>
             </div>}
           </div>
@@ -957,6 +1012,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
             </div>
           </div>
           <button className="btn btn-primary task-cta submit-response-btn" disabled={!canSubmit} onClick={submit}>Submit response <ArrowRight size={17}/></button>
+          {submitError && <p className="task-help" style={{ color: '#c0392b', fontWeight: 700 }}>⚠️ {submitError}</p>}
           {!canSubmit && <p className="task-help">Type a response or record your voice to submit.</p>}
         </div>
       </>}
@@ -1049,7 +1105,7 @@ function Footer({navigate}) {
       </div>
     </div>
     <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate('join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
-  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian</span></div></footer>;
+  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>;
 }
 
 createRoot(document.getElementById('root')).render(<App />);
