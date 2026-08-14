@@ -30,6 +30,16 @@ const normalizePhone = (p) => {
 };
 const validNaijaPhone = (p) => /^0(70|80|81|90|91|93)\d{8}$/.test(p);
 
+// ---------- duplicate detection ----------
+const normText = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9à-öø-ÿ-ỿ]+/g, ' ').trim();
+const tokensOf = (s) => normText(s).split(' ').filter(Boolean);
+const jaccard = (a, b) => {
+  const A = new Set(a), B = new Set(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; A.forEach(x => { if (B.has(x)) inter++; });
+  return inter / (A.size + B.size - inter);
+};
+
 const blankUser = (phone) => ({
   phone, nickname: '', state: '', lga: '', age: '', gender: '', languages: [],
   contributionLang: 'Igbo',
@@ -189,6 +199,23 @@ app.post('/api/contributions', upload.single('audio'), async (req, res) => {
       }
     }
 
+    // ---- quality gate: server-side re-check of client audio analysis ----
+    const duration = Number(body.duration) || 0;
+    if (hasVoice && duration > 0 && duration < 3) return res.status(400).json({ error: 'too_short' });
+
+    // ---- duplicate detection: same contributor, identical / near-identical text ----
+    if (hasText && phone) {
+      const { data: prev } = await supabase.from('contributions')
+        .select('text').eq('phone', normalizePhone(phone))
+        .order('created_at', { ascending: false }).limit(50);
+      const t1 = tokensOf(body.text);
+      for (const p of (prev || [])) {
+        if (normText(p.text) && (normText(p.text) === normText(body.text) || jaccard(t1, tokensOf(p.text)) >= 0.85)) {
+          return res.status(409).json({ error: 'duplicate' });
+        }
+      }
+    }
+
     const mix = (langs || []).length >= 2;
     const earned = (hasText && hasVoice ? POINT_RULES.both : hasVoice ? POINT_RULES.voice : POINT_RULES.text) + (mix ? POINT_RULES.mix : 0);
 
@@ -203,9 +230,13 @@ app.post('/api/contributions', upload.single('audio'), async (req, res) => {
       await saveUser(user);
     }
 
+    // speaker metadata for voice training (age / gender / dialect region)
+    const speaker = user ? { age: user.age || '', gender: user.gender || '', state: user.state || '', lga: user.lga || '', dialect: user.state || '' } : {};
+
     const { data, error } = await supabase.from('contributions').insert({
       phone: phone ? normalizePhone(phone) : null, language, prompt: prompt || '', text: text || '',
-      translation: translation || '', langs, formality: formality || 'Normal', audio_url: audioUrl, points: earned
+      translation: translation || '', langs, formality: formality || 'Normal', audio_url: audioUrl, points: earned,
+      duration, status: 'pending', quality_flags: [], speaker, annotation: ''
     }).select().single();
     if (error) throw error;
 
@@ -216,8 +247,8 @@ app.post('/api/contributions', upload.single('audio'), async (req, res) => {
 // ================= LISTEN / REVIEWS =================
 app.get('/api/clips', async (req, res) => {
   const language = req.query.language;
-  const { data } = await supabase.from('contributions')
-    .select('*').not('audio_url', 'is', null).eq('language', language)
+    const { data } = await supabase.from('contributions')
+    .select('*').not('audio_url', 'is', null).eq('language', language).eq('status', 'pending')
     .order('created_at', { ascending: false }).limit(50);
   const clip = (data || []).find(c => (c.reviews || []).length < 3 && c.phone !== normalizePhone(req.query.phone));
   if (!clip) return res.json(null);
@@ -230,7 +261,14 @@ app.post('/api/reviews', async (req, res) => {
     const { data: clip } = await supabase.from('contributions').select('*').eq('id', clipId).maybeSingle();
     if (!clip) return res.status(404).json({ error: 'Clip not found' });
     const reviews = [...(clip.reviews || []), { phone: phone ? normalizePhone(phone) : null, decision, at: new Date().toISOString() }];
-    await supabase.from('contributions').update({ reviews }).eq('id', clipId);
+    // auto-verdict after 3 peer reviews
+    let status = clip.status || 'pending';
+    if (reviews.length >= 3) {
+      const yes = reviews.filter(r => r.decision === 'yes').length;
+      const no = reviews.filter(r => r.decision === 'no').length;
+      status = yes > no ? 'approved' : 'flagged';
+    }
+    await supabase.from('contributions').update({ reviews, status }).eq('id', clipId);
 
     let user = null;
     if (phone) {
@@ -349,7 +387,13 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
         textOnly: C.filter(c => !c.audio_url && c.text).length,
         reviews: C.reduce((s, c) => s + (c.reviews || []).length, 0),
         pointsIssued: U.reduce((s, u) => s + (u.points || 0), 0),
-        signups7: U.filter(u => u.created_at && now - new Date(u.created_at).getTime() < 7 * dayMs).length
+        signups7: U.filter(u => u.created_at && now - new Date(u.created_at).getTime() < 7 * dayMs).length,
+        audioHours: Math.round((C.reduce((s, c) => s + (c.duration || 0), 0) / 3600) * 100) / 100,
+        approved: C.filter(c => (c.status || 'pending') === 'approved').length,
+        pending: C.filter(c => (c.status || 'pending') === 'pending').length,
+        flagged: C.filter(c => (c.status || 'pending') === 'flagged').length,
+        rejected: C.filter(c => (c.status || 'pending') === 'rejected').length,
+        needTranslation: C.filter(c => !c.translation).length
       },
       byLang,
       last14,
@@ -357,11 +401,13 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
         .map(u => ({ name: u.nickname || 'Anonymous', phone: u.phone, state: u.state || '—', points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0 })),
       recentUsers: [...U].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 10)
         .map(u => ({ phone: u.phone, nickname: u.nickname || '—', state: u.state || '—', kind: u.profile_kind || 'none', points: u.points || 0, createdAt: u.created_at })),
-      recentContribs: C.slice(0, 20).map(c => ({
+      recentContribs: C.slice(0, 200).map(c => ({
         id: c.id, phone: c.phone || 'guest', language: c.language, prompt: c.prompt || '',
-        text: (c.text || '').slice(0, 90), hasAudio: !!c.audio_url, audioUrl: c.audio_url || null,
-        points: c.points || 0,
-        reviews: (c.reviews || []).length, createdAt: c.created_at
+        text: (c.text || '').slice(0, 120), fullText: c.text || '', hasAudio: !!c.audio_url, audioUrl: c.audio_url || null,
+        points: c.points || 0, duration: c.duration || 0, status: c.status || 'pending',
+        hasTranslation: !!c.translation, translation: c.translation || '', annotation: c.annotation || '',
+        speaker: c.speaker || {}, langs: c.langs || [], formality: c.formality || '',
+        reviews: (c.reviews || []).length, maxReviews: 3, createdAt: c.created_at
       })),
       topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
       allUsers: [...U].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 200).map(u => ({
@@ -373,6 +419,26 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
       }))
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// admin: approve / flag / reject a submission
+app.post('/api/admin/status', requireAdmin, async (req, res) => {
+  const { id, status } = req.body || {};
+  if (!['approved', 'flagged', 'rejected', 'pending'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+  const { error } = await supabase.from('contributions').update({ status }).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// admin: save translation / annotation from the review console
+app.post('/api/admin/meta', requireAdmin, async (req, res) => {
+  const { id, translation, annotation } = req.body || {};
+  const patch = {};
+  if (typeof translation === 'string') patch.translation = translation;
+  if (typeof annotation === 'string') patch.annotation = annotation;
+  const { error } = await supabase.from('contributions').update(patch).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 // ---------------- start + auto-seed prompts ----------------
