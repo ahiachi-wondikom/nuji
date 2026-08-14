@@ -14,7 +14,17 @@ import {
   levelInfo, totalSubs, BADGES, earnedBadges, activityPayload, bumpDay,
   rankOf, topLanguage, STATE_ZONES
 } from './db.js';
-import { getPrompt } from './prompts.js';
+import { getPrompt, allPrompts } from './prompts.js';
+
+// ---- prompts store (admin-managed) ----
+{
+  const d = getDB();
+  if (!d.prompts) {
+    d.prompts = allPrompts().map((p, i) => ({ id: i + 1, language: p.language, text: p.text, is_active: true }));
+    d.promptSeq = d.prompts.length + 1;
+    save();
+  }
+}
 
 // Accepts 0803..., +234803..., 234803...
 const normalizePhone = (p) => {
@@ -150,6 +160,8 @@ function profilePayload(user) {
 app.get('/api/prompts', (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
+  const active = getDB().prompts.filter(p => p.language === language && p.is_active);
+  if (active.length) { const p = active[seed % active.length]; return res.json({ text: p.text, language }); }
   res.json({ text: getPrompt(language, seed), language });
 });
 
@@ -382,7 +394,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       gender: u.gender || '', languages: u.languages || [], contributionLang: u.contributionLang || 'Igbo',
       kind: u.profileKind || 'none', refCode: u.refCode || '', referredBy: u.referredBy || '',
       points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0, streak: u.streak || 0,
-      bestStreak: u.bestStreak || 0, createdAt: u.createdAt || ''
+      bestStreak: u.bestStreak || 0, badgesEarned: earnedBadges(u).length, createdAt: u.createdAt || ''
     }))
   });
 });
@@ -405,8 +417,87 @@ app.post('/api/admin/meta', requireAdmin, (req, res) => {
   if (!c) return res.status(404).json({ error: 'Not found' });
   if (typeof translation === 'string') c.translation = translation;
   if (typeof annotation === 'string') c.annotation = annotation;
+  if (typeof (req.body || {}).annotationStatus === 'string') c.annotationStatus = req.body.annotationStatus;
   save();
   res.json({ ok: true });
+});
+
+// ================= ADMIN: ANALYTICS =================
+app.get('/api/admin/analytics', requireAdmin, (req, res) => {
+  const db = getDB();
+  const U = Object.values(db.users), C = db.contributions;
+  const langCounts = {}, stateCounts = {}, genderDist = {}, byDay = {};
+  let codeSwitch = 0, approved = 0, pending = 0, flagged = 0, audio = 0;
+  const dayMs = 86400000, now = Date.now();
+  for (const c of C) {
+    langCounts[c.language] = (langCounts[c.language] || 0) + 1;
+    if ((c.langs || []).length > 1) codeSwitch++;
+    if (c.audioUrl) audio++;
+    const st = c.status || 'pending';
+    if (st === 'approved') approved++; else if (st === 'flagged') flagged++; else pending++;
+    const d = (c.createdAt || '').slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1;
+  }
+  const lastByUser = {};
+  for (const c of C) if (c.phone) { const d = c.createdAt || ''; if (!lastByUser[c.phone] || d > lastByUser[c.phone]) lastByUser[c.phone] = d; }
+  for (const u of U) {
+    if (u.state) stateCounts[u.state] = (stateCounts[u.state] || 0) + 1;
+    genderDist[u.gender || 'Unknown'] = (genderDist[u.gender || 'Unknown'] || 0) + 1;
+  }
+  const growthByDay = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(now - (29 - i) * dayMs).toISOString().slice(0, 10);
+    return { date: d, count: byDay[d] || 0 };
+  });
+  const oldUsers = U.filter(u => u.createdAt && now - new Date(u.createdAt).getTime() >= 7 * dayMs);
+  const stillActive = oldUsers.filter(u => lastByUser[u.phone] && now - new Date(lastByUser[u.phone]).getTime() <= 7 * dayMs).length;
+  res.json({
+    langCounts, stateCounts, genderDistribution: genderDist, growthByDay,
+    totalSubmissions: C.length, approved, pending, flagged, audio,
+    totalContributors: U.length,
+    approvalRate: C.length ? Math.round(approved / C.length * 100) : 0,
+    flagRate: C.length ? Math.round(flagged / C.length * 100) : 0,
+    codeSwitchRate: C.length ? Math.round(codeSwitch / C.length * 100) : 0,
+    retention: { week1Total: oldUsers.length, stillActive, retentionRate: oldUsers.length ? Math.round(stillActive / oldUsers.length * 100) : 0 }
+  });
+});
+
+// ================= ADMIN: PROMPTS MANAGER =================
+app.get('/api/admin/prompts', requireAdmin, (req, res) => res.json([...getDB().prompts].reverse().slice(0, 300)));
+app.post('/api/admin/prompts', requireAdmin, (req, res) => {
+  const { text, language } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'Text required' });
+  const db = getDB();
+  db.prompts.push({ id: db.promptSeq++, language: language || 'Igbo', text: text.trim(), is_active: true });
+  save();
+  res.json({ ok: true });
+});
+app.post('/api/admin/prompts/bulk', requireAdmin, (req, res) => {
+  const { lines = [], language = 'Igbo' } = req.body || {};
+  const rows = lines.map(l => String(l || '').trim()).filter(l => l.length > 3);
+  if (!rows.length) return res.status(400).json({ error: 'No valid lines' });
+  const db = getDB();
+  rows.forEach(t => db.prompts.push({ id: db.promptSeq++, language, text: t, is_active: true }));
+  save();
+  res.json({ ok: true, count: rows.length });
+});
+app.post('/api/admin/prompts/delete', requireAdmin, (req, res) => {
+  const db = getDB();
+  db.prompts = db.prompts.filter(p => p.id !== (req.body || {}).id);
+  save();
+  res.json({ ok: true });
+});
+app.post('/api/admin/prompts/toggle', requireAdmin, (req, res) => {
+  const p = getDB().prompts.find(x => x.id === (req.body || {}).id);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  p.is_active = !p.is_active;
+  save();
+  res.json({ ok: true });
+});
+
+// ================= ADMIN: ANNOTATION QUEUE =================
+app.get('/api/admin/annotate-queue', requireAdmin, (req, res) => {
+  const q = [...getDB().contributions].reverse()
+    .filter(c => (c.langs || []).length > 1 && (c.annotationStatus || 'pending') === 'pending');
+  res.json(q.slice(0, 50));
 });
 
 // ================= START =================
