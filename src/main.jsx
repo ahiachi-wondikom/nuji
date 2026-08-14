@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowRight, Check, ChevronDown, CircleHelp, Headphones, LockKeyhole, Mail, Menu, Mic, Pause, Play, RotateCcw, SkipForward, Trophy, Volume2, X, User, Clock, Award, Send, Phone, Music, MessageCircle, MapPin, Flag, BarChart3, Users, Layers, Globe, Zap, Lock, Type, LogOut } from "lucide-react";
 import { api } from './api.js';
+import Admin from './admin.jsx';
 import nuji10 from './assets/nuji14.jpg';
 import nuji11 from './assets/nuji13.jpg';
 import './styles.css';
@@ -180,8 +181,8 @@ const nigeriaStates = {
 const nigeriaStateNames = Object.keys(nigeriaStates);
 
 function App() {
-  const routeMap = { '/': 'home', '/about': 'about', '/contribute': 'join', '/speak': 'contribute', '/listen': 'listen', '/leaderboard': 'leaderboard', '/state': 'state', '/profile': 'profile' };
-  const pathMap = { home: '/', about: '/about', join: '/contribute', contribute: '/speak', listen: '/listen', leaderboard: '/leaderboard', state: '/state', profile: '/profile' };
+  const routeMap = { '/': 'home', '/about': 'about', '/contribute': 'join', '/speak': 'contribute', '/listen': 'listen', '/leaderboard': 'leaderboard', '/state': 'state', '/profile': 'profile', '/admin': 'admin' };
+  const pathMap = { home: '/', about: '/about', join: '/contribute', contribute: '/speak', listen: '/listen', leaderboard: '/leaderboard', state: '/state', profile: '/profile', admin: '/admin' };
   const [page, setPage] = useState(() => routeMap[window.location.pathname] || 'home');
   const [menuOpen, setMenuOpen] = useState(false);
   const [language, setLanguage] = useState(languages[0]);
@@ -227,8 +228,9 @@ function App() {
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
         {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
+        {page === 'admin' && <Admin />}
       </main>
-      <Footer navigate={navigate} />
+      {page !== 'admin' && <Footer navigate={navigate} />}
     </div>
   );
 }
@@ -412,7 +414,7 @@ function About({ navigate }) {
           </div>
           <button className="btn btn-light" onClick={() => navigate('join')}>Start Contributing <ArrowRight size={18} /></button>
         </div>
-        <p className="about-signoff">Built for the people. Powered by their voice. 🇳</p>
+        <p className="about-signoff">Built for the people. Powered by their voice. 🇳🇬</p>
       </section>
     </section>
   );
@@ -628,7 +630,7 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
     setLocalPhone(normalized);
     setPhone(normalized);
     const res = await api.checkPhone(normalized);
-    // Registered member (full profile) -> straight to the Speak page
+    // Registered member (full profile) -> straight to the profile dashboard
     if (res && res.hasProfile) { navigate('contribute'); return; }
     // Brand-new number OR previously quick-contributed -> show both options
     setReturning(false);
@@ -829,7 +831,7 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
             <Trust icon="🔒" title="No password" text="Just your phone number"/>
             <Trust icon="⚡" title="Instant access" text="Returning users skip setup"/>
             <Trust icon="🏆" title="Track points" text="See your rank & progress"/>
-            <Trust icon="🇳" title="Your data" text="Helping 200M+ Nigerians"/>
+            <Trust icon="🇳🇬" title="Your data" text="Helping 200M+ Nigerians"/>
           </div>
         </div>
       </div>
