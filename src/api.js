@@ -69,6 +69,13 @@ export const api = {
   // ---- admin (token-protected) ----
   adminLogin: (email, password) => post('/admin/login', { email, password }),
   adminOverview: () => get('/admin/overview'),
+  adminAnalytics: () => get('/admin/analytics'),
   adminSetStatus: (id, status) => post('/admin/status', { id, status }),
-  adminUpdateMeta: (data) => post('/admin/meta', data)
+  adminUpdateMeta: (data) => post('/admin/meta', data),
+  adminPrompts: () => get('/admin/prompts'),
+  adminAddPrompt: (data) => post('/admin/prompts', data),
+  adminBulkPrompts: (data) => post('/admin/prompts/bulk', data),
+  adminDeletePrompt: (id) => post('/admin/prompts/delete', { id }),
+  adminTogglePrompt: (id) => post('/admin/prompts/toggle', { id }),
+  adminAnnotateQueue: () => get('/admin/annotate-queue')
 };
