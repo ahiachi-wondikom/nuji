@@ -25,6 +25,16 @@ const normalizePhone = (p) => {
 };
 const validNaijaPhone = (p) => /^0(70|80|81|90|91|93)\d{8}$/.test(p);
 
+// ---------- duplicate detection ----------
+const normText = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9à-öø-ÿ-ỿ-]+/g, ' ').trim();
+const tokensOf = (s) => normText(s).split(' ').filter(Boolean);
+const jaccard = (a, b) => {
+  const A = new Set(a), B = new Set(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; A.forEach(x => { if (B.has(x)) inter++; });
+  return inter / (A.size + B.size - inter);
+};
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
@@ -154,6 +164,21 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
   const hasVoice = !!req.file;
   if (!hasText && !hasVoice) return res.status(400).json({ error: 'Nothing to submit' });
 
+  // quality gate
+  const duration = Number(body.duration) || 0;
+  if (hasVoice && duration > 0 && duration < 3) return res.status(400).json({ error: 'too_short' });
+
+  // duplicate detection
+  if (hasText && phone) {
+    const prev = getDB().contributions.filter(c => c.phone === normalizePhone(phone)).slice(-50);
+    const t1 = tokensOf(body.text);
+    for (const p of prev) {
+      if (normText(p.text) && (normText(p.text) === normText(body.text) || jaccard(t1, tokensOf(p.text)) >= 0.85)) {
+        return res.status(409).json({ error: 'duplicate' });
+      }
+    }
+  }
+
   const mix = (langs || []).length >= 2;
   const earned = (hasText && hasVoice ? POINT_RULES.both : hasVoice ? POINT_RULES.voice : POINT_RULES.text) + (mix ? POINT_RULES.mix : 0);
 
@@ -169,6 +194,7 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
     bumpDay(user);
   }
 
+  const speaker = user ? { age: user.age || '', gender: user.gender || '', state: user.state || '', lga: user.lga || '', dialect: user.state || '' } : {};
   const contribution = {
     id: crypto.randomUUID(),
     phone: phone || null,
@@ -180,6 +206,11 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
     formality: formality || 'Normal',
     audioUrl: req.file ? `/uploads/${req.file.filename}` : null,
     points: earned,
+    duration,
+    status: 'pending',
+    qualityFlags: [],
+    speaker,
+    annotation: '',
     reviews: [],
     createdAt: new Date().toISOString()
   };
@@ -197,7 +228,7 @@ app.get('/api/clips', (req, res) => {
   const db = getDB();
   const clip = [...db.contributions]
     .reverse()
-    .find(c => c.audioUrl && c.language === language && c.reviews.length < 3 && c.phone !== normalizePhone(req.query.phone));
+    .find(c => c.audioUrl && (c.status || 'pending') === 'pending' && c.language === language && c.reviews.length < 3 && c.phone !== normalizePhone(req.query.phone));
   if (!clip) return res.json(null);
   res.json({ id: clip.id, audioUrl: clip.audioUrl, prompt: clip.prompt || clip.text });
 });
@@ -209,6 +240,11 @@ app.post('/api/reviews', (req, res) => {
   if (!clip) return res.status(404).json({ error: 'Clip not found' });
 
   clip.reviews.push({ phone: phone || null, decision, at: new Date().toISOString() });
+  if (clip.reviews.length >= 3) {
+    const yes = clip.reviews.filter(r => r.decision === 'yes').length;
+    const no = clip.reviews.filter(r => r.decision === 'no').length;
+    clip.status = yes > no ? 'approved' : 'flagged';
+  }
 
   let user = null;
   if (phone) {
@@ -319,18 +355,26 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       textOnly: db.contributions.filter(c => !c.audioUrl && c.text).length,
       reviews: db.contributions.reduce((s, c) => s + (c.reviews || []).length, 0),
       pointsIssued: U.reduce((s, u) => s + (u.points || 0), 0),
-      signups7: U.filter(u => u.createdAt && now - new Date(u.createdAt).getTime() < 7 * dayMs).length
+      signups7: U.filter(u => u.createdAt && now - new Date(u.createdAt).getTime() < 7 * dayMs).length,
+      audioHours: Math.round((db.contributions.reduce((s, c) => s + (c.duration || 0), 0) / 3600) * 100) / 100,
+      approved: db.contributions.filter(c => (c.status || 'pending') === 'approved').length,
+      pending: db.contributions.filter(c => (c.status || 'pending') === 'pending').length,
+      flagged: db.contributions.filter(c => (c.status || 'pending') === 'flagged').length,
+      rejected: db.contributions.filter(c => (c.status || 'pending') === 'rejected').length,
+      needTranslation: db.contributions.filter(c => !c.translation).length
     },
     byLang, last14,
     topUsers: [...U].sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 10)
       .map(u => ({ name: u.nickname || 'Anonymous', phone: u.phone, state: u.state || '—', points: u.points || 0, subs: subsOf(u), reviews: u.reviews || 0 })),
     recentUsers: [...U].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10)
       .map(u => ({ phone: u.phone, nickname: u.nickname || '—', state: u.state || '—', kind: u.profileKind || 'none', points: u.points || 0, createdAt: u.createdAt })),
-    recentContribs: C.slice(0, 20).map(c => ({
+    recentContribs: C.slice(0, 200).map(c => ({
       id: c.id, phone: c.phone || 'guest', language: c.language, prompt: c.prompt || '',
-      text: (c.text || '').slice(0, 90), hasAudio: !!c.audioUrl, audioUrl: c.audioUrl || null,
-      points: c.points || 0,
-      reviews: (c.reviews || []).length, createdAt: c.createdAt
+      text: (c.text || '').slice(0, 120), fullText: c.text || '', hasAudio: !!c.audioUrl, audioUrl: c.audioUrl || null,
+      points: c.points || 0, duration: c.duration || 0, status: c.status || 'pending',
+      hasTranslation: !!c.translation, translation: c.translation || '', annotation: c.annotation || '',
+      speaker: c.speaker || {}, langs: c.langs || [], formality: c.formality || '',
+      reviews: (c.reviews || []).length, maxReviews: 3, createdAt: c.createdAt
     })),
     topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
     allUsers: [...U].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 200).map(u => ({
@@ -341,6 +385,28 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       bestStreak: u.bestStreak || 0, createdAt: u.createdAt || ''
     }))
   });
+});
+
+// admin: approve / flag / reject
+app.post('/api/admin/status', requireAdmin, (req, res) => {
+  const { id, status } = req.body || {};
+  if (!['approved', 'flagged', 'rejected', 'pending'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+  const c = getDB().contributions.find(x => x.id === id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  c.status = status;
+  save();
+  res.json({ ok: true });
+});
+
+// admin: save translation / annotation
+app.post('/api/admin/meta', requireAdmin, (req, res) => {
+  const { id, translation, annotation } = req.body || {};
+  const c = getDB().contributions.find(x => x.id === id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  if (typeof translation === 'string') c.translation = translation;
+  if (typeof annotation === 'string') c.annotation = annotation;
+  save();
+  res.json({ ok: true });
 });
 
 // ================= START =================
