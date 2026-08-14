@@ -64,12 +64,13 @@ async function analyzeAudio(blob) {
   } catch { return null; }
 }
 // industry-style heuristics: too short / silent mic / extreme noise
+// (metrics come from LIVE mic monitoring, so they work in every browser)
 function audioProblems(m) {
   if (!m) return [];
   const p = [];
   if (m.duration < 3) p.push('too_short');
-  if (m.rms < 0.004) p.push('silent');
-  if (m.rms > 0.35 || m.zcr > 0.5) p.push('noisy');
+  if (m.n > 0 && (m.activeFrac < 0.05 || m.rms < 0.005)) p.push('silent');
+  if (m.n > 0 && (m.rms > 0.35 || (m.zcr > 0.4 && m.rms > 0.06))) p.push('noisy');
   return p;
 }
 const AUDIO_ERROR_MSG = {
@@ -411,7 +412,7 @@ function About({ navigate }) {
           </div>
           <button className="btn btn-light" onClick={() => navigate('join')}>Start Contributing <ArrowRight size={18} /></button>
         </div>
-        <p className="about-signoff">Built for the people. Powered by their voice. 🇳🇬</p>
+        <p className="about-signoff">Built for the people. Powered by their voice. 🇳</p>
       </section>
     </section>
   );
@@ -627,8 +628,8 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
     setLocalPhone(normalized);
     setPhone(normalized);
     const res = await api.checkPhone(normalized);
-    // Registered member (full profile) -> straight to the profile dashboard
-    if (res && res.hasProfile) { navigate('profile'); return; }
+    // Registered member (full profile) -> straight to the Speak page
+    if (res && res.hasProfile) { navigate('contribute'); return; }
     // Brand-new number OR previously quick-contributed -> show both options
     setReturning(false);
     setStep('choose');
@@ -828,7 +829,7 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
             <Trust icon="🔒" title="No password" text="Just your phone number"/>
             <Trust icon="⚡" title="Instant access" text="Returning users skip setup"/>
             <Trust icon="🏆" title="Track points" text="See your rank & progress"/>
-            <Trust icon="🇳🇬" title="Your data" text="Helping 200M+ Nigerians"/>
+            <Trust icon="🇳" title="Your data" text="Helping 200M+ Nigerians"/>
           </div>
         </div>
       </div>
@@ -863,6 +864,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   const [submitError, setSubmitError] = useState('');
   const [promptText, setPromptText] = useState(language.sample);
   const recRef = useRef(null);
+  const startTsRef = useRef(0);
   const blobUrlRef = useRef(null);
 
   // rotate a fresh prompt from the database for every sentence
@@ -882,16 +884,48 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   const toggleLang = (name) => setSelectedLangs(l => l.includes(name) ? l.filter(x => x !== name) : [...l, name]);
 
   const startRecording = async () => {
-    setTime(0); setRecStage('recording'); setAudioBlob(null);
+    setTime(0); setRecStage('recording'); setAudioBlob(null); setAudioMeta(null); setAudioError('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // LIVE mic monitoring — measures level/noise WHILE recording (works everywhere)
+      const stats = { sum: 0, n: 0, zc: 0, active: 0, prev: 0 };
+      let actx = null, timer = null;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        actx = new AC();
+        const analyser = actx.createAnalyser();
+        analyser.fftSize = 1024;
+        actx.createMediaStreamSource(stream).connect(analyser);
+        const buf = new Float32Array(analyser.fftSize);
+        timer = setInterval(() => {
+          analyser.getFloatTimeDomainData(buf);
+          for (let i = 0; i < buf.length; i += 4) {
+            const v = buf[i];
+            stats.sum += v * v; stats.n++;
+            if (Math.abs(v) > 0.01) stats.active++;
+            if ((v >= 0) !== (stats.prev >= 0)) stats.zc++;
+            stats.prev = v;
+          }
+        }, 100);
+      } catch { /* monitoring unavailable — duration still enforced */ }
+
       const rec = new MediaRecorder(stream);
       const chunks = [];
       rec.ondataavailable = e => chunks.push(e.data);
-      rec.onstop = async () => {
+      rec.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
+        if (timer) clearInterval(timer);
+        if (actx) actx.close().catch(() => {});
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-        const meta = await analyzeAudio(blob);
+        const n = stats.n || 0;
+        const meta = {
+          duration: (Date.now() - startTsRef.current) / 1000,
+          rms: n ? Math.sqrt(stats.sum / n) : 0,
+          activeFrac: n ? stats.active / n : 0,
+          zcr: n ? stats.zc / n : 0,
+          n
+        };
         const probs = audioProblems(meta);
         if (probs.length) {
           // automatic rejection — bad audio never reaches the database
@@ -902,8 +936,13 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
         }
       };
       recRef.current = rec;
+      startTsRef.current = Date.now();
       rec.start();
-    } catch { recRef.current = null; }
+    } catch {
+      recRef.current = null;
+      setAudioError('Microphone unavailable — check browser permissions and try again.');
+      setRecStage('idle');
+    }
   };
   const stopRecording = () => { if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop(); setRecStage('recorded'); };
   const reRecord = () => {
@@ -923,6 +962,17 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
 
   const submit = async () => {
     setSubmitError('');
+    // final safety net: re-validate the audio at submit time
+    if (audioBlob) {
+      const probs = audioProblems(audioMeta);
+      const dur = (audioMeta && audioMeta.duration) || time;
+      if (dur < 3 || probs.length) {
+        setAudioError(AUDIO_ERROR_MSG[probs[0] || 'too_short']);
+        setSubmitError(AUDIO_ERROR_MSG[probs[0] || 'too_short']);
+        setRecStage('idle'); setAudioBlob(null); setAudioMeta(null);
+        return;
+      }
+    }
     const data = { phone: phone || undefined, language: language.name, text: textResponse, translation, langs: selectedLangs, formality, prompt: promptText, duration: audioMeta ? audioMeta.duration : 0 };
     let result = null;
     if (audioBlob) {
