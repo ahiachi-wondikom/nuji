@@ -38,6 +38,21 @@ export const api = {
   // ---- contributions ----
   submitContribution: (data) => post('/contributions', data),           // JSON (text only)
   submitContributionWithAudio: (formData) => post('/contributions', formData), // multipart (voice)
+  // submission with real error messages (duplicate / quality rejection)
+  trySubmit: async (data) => {
+    try {
+      const res = await fetch(BASE + '/contributions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      const j = await res.json().catch(() => null);
+      return { ok: res.ok, ...(j || {}) };
+    } catch { return { ok: false }; }
+  },
+  trySubmitAudio: async (fd) => {
+    try {
+      const res = await fetch(BASE + '/contributions', { method: 'POST', body: fd });
+      const j = await res.json().catch(() => null);
+      return { ok: res.ok, ...(j || {}) };
+    } catch { return { ok: false }; }
+  },
 
   // ---- prompts (Speak page sentences) ----
   getPrompt: (language, seed) => get(`/prompts?language=${encodeURIComponent(language)}&seed=${seed || 0}`),
@@ -53,5 +68,7 @@ export const api = {
 
   // ---- admin (token-protected) ----
   adminLogin: (email, password) => post('/admin/login', { email, password }),
-  adminOverview: () => get('/admin/overview')
+  adminOverview: () => get('/admin/overview'),
+  adminSetStatus: (id, status) => post('/admin/status', { id, status }),
+  adminUpdateMeta: (data) => post('/admin/meta', data)
 };
