@@ -77,5 +77,6 @@ export const api = {
   adminBulkPrompts: (data) => post('/admin/prompts/bulk', data),
   adminDeletePrompt: (id) => post('/admin/prompts/delete', { id }),
   adminTogglePrompt: (id) => post('/admin/prompts/toggle', { id }),
-  adminAnnotateQueue: () => get('/admin/annotate-queue')
+  adminAnnotateQueue: () => get('/admin/annotate-queue'),
+  adminUploadAudio: (fd) => post('/admin/audio', fd)
 };
