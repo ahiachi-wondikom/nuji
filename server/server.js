@@ -160,8 +160,12 @@ function profilePayload(user) {
 app.get('/api/prompts', (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
-  const active = getDB().prompts.filter(p => p.language === language && p.is_active);
-  if (active.length) { const p = active[seed % active.length]; return res.json({ text: p.text, language }); }
+  // RATIONING: max 2 contributors per prompt, then rotate
+  const db = getDB();
+  const pool = db.prompts.filter(p => p.language === language && p.is_active);
+  let p = pool.filter(x => (x.uses || 0) < 2).sort((a, b) => (a.uses - b.uses) || (a.id - b.id))[0]
+         || pool.sort((a, b) => (a.uses - b.uses) || (a.id - b.id))[0];
+  if (p) { p.uses = (p.uses || 0) + 1; save(); return res.json({ text: p.text, language, id: p.id, uses: p.uses }); }
   res.json({ text: getPrompt(language, seed), language });
 });
 
@@ -422,6 +426,20 @@ app.post('/api/admin/meta', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// admin: attach a missing voice recording to a submission
+app.post('/api/admin/audio', requireAdmin, upload.single('audio'), (req, res) => {
+  const id = (req.body || {}).id;
+  if (!id || !req.file) return res.status(400).json({ error: 'id and audio file required' });
+  const c = getDB().contributions.find(x => x.id === id);
+  if (!c) return res.status(404).json({ error: 'Not found' });
+  const fname = `admin-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.webm`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, fname), req.file.buffer);
+  c.audioUrl = `/uploads/${fname}`;
+  if (req.body.duration) c.duration = Number(req.body.duration) || 0;
+  save();
+  res.json({ ok: true, audioUrl: c.audioUrl });
+});
+
 // ================= ADMIN: ANALYTICS =================
 app.get('/api/admin/analytics', requireAdmin, (req, res) => {
   const db = getDB();
@@ -496,7 +514,7 @@ app.post('/api/admin/prompts/toggle', requireAdmin, (req, res) => {
 // ================= ADMIN: ANNOTATION QUEUE =================
 app.get('/api/admin/annotate-queue', requireAdmin, (req, res) => {
   const q = [...getDB().contributions].reverse()
-    .filter(c => (c.langs || []).length > 1 && (c.annotationStatus || 'pending') === 'pending');
+    .filter(c => (c.text || '').trim() && (c.annotationStatus || 'pending') === 'pending');
   res.json(q.slice(0, 50));
 });
 
