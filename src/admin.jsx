@@ -24,6 +24,8 @@ const STATUS = {
   rejected: { label: 'Rejected', cls: 'st-rejected' }
 };
 
+const PROMPT_LANGS = ['Igbo', 'Yoruba', 'Hausa', 'Pidgin', 'English'];
+
 const TAGS = [
   { tag: 'IGBO', label: 'Igbo', color: '#059669', bg: '#f0fdf4' },
   { tag: 'YOR', label: 'Yoruba', color: '#d97706', bg: '#fff7ed' },
@@ -89,6 +91,9 @@ function DetailModal({ item, onClose, onChanged }) {
   const [annotation, setAnnotation] = useState(item.annotation || '');
   const [status, setStatus] = useState(item.status || 'pending');
   const [msg, setMsg] = useState('');
+  const [extraAudio, setExtraAudio] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
 
   const saveMeta = async () => {
     await api.adminUpdateMeta({ id: item.id, translation, annotation });
@@ -125,16 +130,32 @@ function DetailModal({ item, onClose, onChanged }) {
           <div className="admin-modal-section"><h5>📝 Daily prompt</h5><p>{item.prompt}</p></div>
           <div className="admin-modal-section"><h5>💬 Contributor response {item.formality && <em style={{ textTransform: 'none' }}>· {item.formality}</em>}</h5><p>{item.fullText || item.text || '—'}</p></div>
 
-          {item.hasAudio ? (
+          {(item.hasAudio || extraAudio) ? (
             <div className="admin-modal-section">
               <h5>🎙 Voice recording · {fmtDur(item.duration)}</h5>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AudioCell url={item.audioUrl} />
+                <AudioCell url={item.audioUrl || extraAudio} />
                 <span className="admin-muted" style={{ fontSize: 12 }}>Quality-checked on submission (≥3s, not silent, not noisy)</span>
               </div>
             </div>
           ) : (
-            <div className="admin-modal-section"><h5>⚠️ No voice recording</h5><p>Text-only submission. Voice + text pairs are far more valuable for training.</p></div>
+            <div className="admin-modal-section">
+              <h5>⚠️ Missing voice recording</h5>
+              <p>Attach the contributor's recording (e.g. received via WhatsApp) so this submission can be approved.</p>
+              <input type="file" accept="audio/*" ref={fileRef} style={{ fontSize: 12, marginTop: 6 }} />
+              <button className="btn btn-primary" style={{ marginTop: 8 }} disabled={uploading} onClick={async () => {
+                const f = fileRef.current && fileRef.current.files[0];
+                if (!f) { setMsg('Choose an audio file first'); setTimeout(() => setMsg(''), 1500); return; }
+                setUploading(true);
+                const fd = new FormData();
+                fd.append('id', item.id);
+                fd.append('audio', f);
+                const r = await api.adminUploadAudio(fd);
+                setUploading(false);
+                if (r && r.ok) { setExtraAudio(r.audioUrl); setMsg('Voice attached ✓ — you can now approve'); onChanged(); setTimeout(() => setMsg(''), 2000); }
+                else setMsg('Upload failed — try again');
+              }}>{uploading ? 'Uploading…' : 'Upload audio'}</button>
+            </div>
           )}
 
           <div className="admin-modal-section">
@@ -180,7 +201,7 @@ function AnnotateTab({ onChanged }) {
   const [saved, setSaved] = useState(0);
   const [showGuide, setShowGuide] = useState(false);
 
-  const load = useCallback(() => api.adminAnnotateQueue().then(q => { setQueue(q || []); setIdx(0); }), []);
+  const load = useCallback(() => (api.adminAnnotateQueue ? api.adminAnnotateQueue() : Promise.resolve([])).then(q => { setQueue(q || []); setIdx(0); }), []);
   useEffect(() => { load(); }, [load]);
 
   const current = (queue || [])[idx] || null;
@@ -342,7 +363,7 @@ function Admin() {
     });
   }, []);
   useEffect(() => { if (token) load(); }, [token, load]);
-  useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts().then(setPrompts); }, [tab, token]);
+  useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics && api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts && api.adminPrompts().then(setPrompts); }, [tab, token]);
 
   const login = async (e) => {
     e.preventDefault();
@@ -356,10 +377,7 @@ function Admin() {
     <section className="admin-page"><div className="admin-shell">
       <div className="admin-aside"><div><div className="eyebrow">Nuji operations</div><h1>Keep every voice<br /><em>moving forward.</em></h1><p>Secure access for Nuji dataset administrators and community operations teams.</p></div><span>© 2026 Nuji · Internal platform</span></div>
       <div className="admin-login">
-        <div className="admin-mobile-logo">
-  <img className="brand-logo" src="/assets/nuji-logo.png" alt="" />
-  <span>nuji <b>admin</b></span>
-</div>
+        <div className="admin-mobile-logo"><span className="brand-mark">N</span></div>
         <div className="admin-copy"><div className="eyebrow ink">Admin portal</div><h2>Welcome back.</h2><p>Sign in to manage contributions and community quality.</p></div>
         <form onSubmit={login}>
           <Field label="Work email"><span className="input-icon"><Mail size={18} /><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@nuji.ng" required /></span></Field>
@@ -423,10 +441,7 @@ function Admin() {
   return (
     <div className="admin-app">
       <aside className="admin-side">
-       <div className="admin-side-brand">
-  <img className="brand-logo" src="/assets/nuji-logo.png" alt="" />
-  <span>nuji <b>admin</b></span>
-</div>
+        <div className="admin-side-brand"><img className="brand-logo" src="/assets/nuji-logo.png" alt="" /><span>nuji <b>admin</b></span></div>
         <nav className="admin-side-nav">
           {TABS.map(x => (
             <button key={x.id} className={tab === x.id ? 'admin-nav-btn active' : 'admin-nav-btn'} onClick={() => setTab(x.id)}>{x.icon}{x.label}</button>
@@ -604,8 +619,8 @@ function Admin() {
 
         {/* ============ PROMPTS MANAGER ============ */}
         {tab === 'prompts' && <div className="admin-content">
-          <div className="admin-kpis" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
-            {['Igbo', 'Yoruba', 'Hausa', 'Pidgin'].map(l => (
+          <div className="admin-kpis" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
+            {PROMPT_LANGS.map(l => (
               <div key={l} className="admin-kpi green">
                 <strong>{(prompts || []).filter(p => p.language === l && p.is_active).length}</strong>
                 <span className="admin-kpi-label">{l} active prompts</span>
@@ -621,7 +636,7 @@ function Admin() {
               </Field>
               <Field label="Language">
                 <select value={newPrompt.language} onChange={e => setNewPrompt(p => ({ ...p, language: e.target.value }))}>
-                  {['Igbo', 'Yoruba', 'Hausa', 'Pidgin'].map(l => <option key={l}>{l}</option>)}
+                  {PROMPT_LANGS.map(l => <option key={l}>{l}</option>)}
                 </select>
               </Field>
               <button className="btn btn-primary" style={{ marginTop: 10 }} onClick={async () => {
@@ -636,7 +651,7 @@ function Admin() {
               <textarea className="admin-textarea" rows={5} value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'Paste many prompts, one per line…'} />
               <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
                 <select value={bulkLang} onChange={e => setBulkLang(e.target.value)} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', font: 'inherit', fontSize: 13 }}>
-                  {['Igbo', 'Yoruba', 'Hausa', 'Pidgin'].map(l => <option key={l}>{l}</option>)}
+                  {PROMPT_LANGS.map(l => <option key={l}>{l}</option>)}
                 </select>
                 <button className="btn btn-primary" onClick={async () => {
                   const lines = bulkText.split('\n');
@@ -744,7 +759,24 @@ function Admin() {
 }
 
 // Standalone entry (admin.html uses #admin-root) — also importable as a route from the main app
-const adminRoot = document.getElementById('admin-root');
-if (adminRoot) createRoot(adminRoot).render(<Admin />);
+class AdminErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) return (
+      <section className="admin-page">
+        <div className="admin-shell" style={{ gridTemplateColumns: '1fr' }}>
+          <div className="admin-login">
+            <div className="admin-copy"><div className="eyebrow ink">Admin portal</div><h2>Something went wrong.</h2><p style={{ color: '#c0392b', fontWeight: 700, wordBreak: 'break-word' }}>{String(this.state.err && this.state.err.message)}</p><p>Please make sure you copied <b>api.js</b>, <b>admin.jsx</b> and <b>main.jsx</b> together from the latest zip, then redeploy and hard-refresh.</p></div>
+          </div>
+        </div>
+      </section>
+    );
+    return this.props.children;
+  }
+}
 
-export default Admin;
+const adminRoot = document.getElementById('admin-root');
+if (adminRoot) createRoot(adminRoot).render(<AdminErrorBoundary><Admin /></AdminErrorBoundary>);
+
+export default (props) => <AdminErrorBoundary><Admin {...props} /></AdminErrorBoundary>;
