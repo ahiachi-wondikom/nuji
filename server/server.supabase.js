@@ -170,10 +170,19 @@ app.get('/api/profile/:phone', async (req, res) => {
 app.get('/api/prompts', async (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
-  const { count } = await supabase.from('prompts').select('*', { count: 'exact', head: true }).eq('language', language).eq('is_active', true);
-  if (count) {
-    const { data } = await supabase.from('prompts').select('text').eq('language', language).eq('is_active', true).order('id').range(seed % count, seed % count);
-    if (data && data[0]) return res.json({ text: data[0].text, language });
+  // RATIONING: a prompt is shown to at most 2 contributors, then the next one rotates in
+  let { data } = await supabase.from('prompts').select('*')
+    .eq('language', language).eq('is_active', true).lt('uses', 2)
+    .order('uses').order('id').limit(1);
+  if (!data || !data.length) {
+    ({ data } = await supabase.from('prompts').select('*')
+      .eq('language', language).eq('is_active', true)
+      .order('uses').order('id').limit(1));
+  }
+  if (data && data[0]) {
+    const p = data[0];
+    await supabase.from('prompts').update({ uses: (p.uses || 0) + 1 }).eq('id', p.id);
+    return res.json({ text: p.text, language, id: p.id, uses: (p.uses || 0) + 1 });
   }
   res.json({ text: getPrompt(language, seed), language });
 });
@@ -443,6 +452,23 @@ app.post('/api/admin/meta', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// admin: attach a missing voice recording to a submission
+app.post('/api/admin/audio', requireAdmin, upload.single('audio'), async (req, res) => {
+  try {
+    const id = (req.body || {}).id;
+    if (!id || !req.file) return res.status(400).json({ error: 'id and audio file required' });
+    const path = `admin-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.webm`;
+    const { error } = await supabase.storage.from('recordings').upload(path, req.file.buffer, { contentType: req.file.mimetype || 'audio/webm' });
+    if (error) throw error;
+    const audioUrl = supabase.storage.from('recordings').getPublicUrl(path).data.publicUrl;
+    const patch = { audio_url: audioUrl };
+    if (req.body.duration) patch.duration = Number(req.body.duration) || 0;
+    const { error: e2 } = await supabase.from('contributions').update(patch).eq('id', id);
+    if (e2) throw e2;
+    res.json({ ok: true, audioUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ================= ADMIN: ANALYTICS =================
 app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
   try {
@@ -519,7 +545,7 @@ app.post('/api/admin/prompts/toggle', requireAdmin, async (req, res) => {
 // ================= ADMIN: ANNOTATION QUEUE =================
 app.get('/api/admin/annotate-queue', requireAdmin, async (req, res) => {
   const { data } = await supabase.from('contributions').select('*').order('created_at', { ascending: false }).limit(500);
-  const q = (data || []).filter(c => (c.langs || []).length > 1 && (c.annotation_status || 'pending') === 'pending');
+  const q = (data || []).filter(c => (c.text || '').trim() && (c.annotation_status || 'pending') === 'pending');
   res.json(q.slice(0, 50));
 });
 
