@@ -94,6 +94,52 @@ function DetailModal({ item, onClose, onChanged }) {
   const [extraAudio, setExtraAudio] = useState(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
+  const [recState, setRecState] = useState('idle');
+  const [recBlob, setRecBlob] = useState(null);
+  const [recUrl, setRecUrl] = useState(null);
+  const [recTime, setRecTime] = useState(0);
+  const recRef = useRef(null);
+  const recTimer = useRef(null);
+
+  useEffect(() => { if (recBlob) setRecUrl(URL.createObjectURL(recBlob)); }, [recBlob]);
+
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks = [];
+      rec.ondataavailable = e => chunks.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        clearInterval(recTimer.current);
+        setRecBlob(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
+        setRecState('idle');
+      };
+      recRef.current = rec;
+      setRecBlob(null); setRecUrl(null); setRecTime(0);
+      recTimer.current = setInterval(() => setRecTime(t => t + 1), 1000);
+      setRecState('recording');
+      rec.start();
+    } catch { setMsg('Microphone unavailable on this device'); setTimeout(() => setMsg(''), 1800); }
+  };
+  const stopRec = () => { if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop(); };
+
+  const attachBlob = async (blob) => {
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('id', item.id);
+    fd.append('audio', blob, 'recording.webm');
+    const r = await api.adminUploadAudio(fd);
+    setUploading(false);
+    if (r && r.ok) { setExtraAudio(r.audioUrl); setMsg('Voice attached ✓ — you can now approve'); onChanged(); setTimeout(() => setMsg(''), 2200); }
+    else { setMsg('Upload failed — try again'); setTimeout(() => setMsg(''), 1800); }
+  };
+
+  const uploadFile = async () => {
+    const f = fileRef.current && fileRef.current.files[0];
+    if (!f) { setMsg('Choose an audio file first'); setTimeout(() => setMsg(''), 1500); return; }
+    attachBlob(f);
+  };
 
   const saveMeta = async () => {
     await api.adminUpdateMeta({ id: item.id, translation, annotation });
@@ -141,20 +187,26 @@ function DetailModal({ item, onClose, onChanged }) {
           ) : (
             <div className="admin-modal-section">
               <h5>⚠️ Missing voice recording</h5>
-              <p>Attach the contributor's recording (e.g. received via WhatsApp) so this submission can be approved.</p>
-              <input type="file" accept="audio/*" ref={fileRef} style={{ fontSize: 12, marginTop: 6 }} />
-              <button className="btn btn-primary" style={{ marginTop: 8 }} disabled={uploading} onClick={async () => {
-                const f = fileRef.current && fileRef.current.files[0];
-                if (!f) { setMsg('Choose an audio file first'); setTimeout(() => setMsg(''), 1500); return; }
-                setUploading(true);
-                const fd = new FormData();
-                fd.append('id', item.id);
-                fd.append('audio', f);
-                const r = await api.adminUploadAudio(fd);
-                setUploading(false);
-                if (r && r.ok) { setExtraAudio(r.audioUrl); setMsg('Voice attached ✓ — you can now approve'); onChanged(); setTimeout(() => setMsg(''), 2000); }
-                else setMsg('Upload failed — try again');
-              }}>{uploading ? 'Uploading…' : 'Upload audio'}</button>
+              <p>Record the voice yourself right now, or upload the contributor's file (e.g. from WhatsApp) — then approve the submission.</p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                {recState === 'idle' ? (
+                  <button className="btn btn-secondary" onClick={startRec}><Mic size={15} /> Record voice</button>
+                ) : (
+                  <button className="btn" style={{ background: '#fee2e2', color: '#991b1b' }} onClick={stopRec}>
+                    <span style={{ width: 11, height: 11, background: '#991b1b', borderRadius: 2, display: 'inline-block' }} /> Stop · {fmtDur(recTime)}
+                  </button>
+                )}
+                {recBlob && (
+                  <>
+                    <AudioCell url={recUrl} />
+                    <button className="btn btn-primary" disabled={uploading} onClick={() => attachBlob(recBlob)}>{uploading ? 'Saving…' : 'Attach recording'}</button>
+                  </>
+                )}
+              </div>
+              <div style={{ marginTop: 12, borderTop: '1px dashed #e5e7eb', paddingTop: 10 }}>
+                <input type="file" accept="audio/*" ref={fileRef} style={{ fontSize: 12 }} />
+                <button className="btn btn-primary" style={{ marginTop: 8 }} disabled={uploading} onClick={uploadFile}>{uploading ? 'Uploading…' : 'Upload audio file'}</button>
+              </div>
             </div>
           )}
 
