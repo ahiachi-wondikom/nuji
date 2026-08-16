@@ -15,13 +15,10 @@ cd nuji-next
 ---
 
 ## 1. Database — Supabase (5 min)
-1. Go to **supabase.com** → Sign in → **New project** (free plan). Choose a name + password + region (pick one close to Nigeria, e.g. *eu-west-1*).
-2. Wait ~2 minutes for it to start.
-3. Left sidebar → **SQL Editor** → **New query**.
-4. Open the file **`supabase-schema.sql`** from this project, copy ALL of it, paste into the editor, click **Run**.
+1. Open the file **`supabase-schema.sql`** from this project, copy ALL of it, paste into the editor, click **Run**.
    - You should see *"Success. No rows returned."* ✅
    - (This creates the `users`, `contributions`, `prompts` tables + the voice-recordings storage bucket. The server fills the prompt library automatically on first start.)
-5. Left sidebar → **Settings (⚙) → API**. Copy these two values and keep them in a note:
+2. Left sidebar → **Settings (⚙) → API**. Copy these two values and keep them in a note:
    - **Project URL** → looks like `https://abcdefgh.supabase.co`
    - **service_role key** → click *Reveal* → copy (🔒 secret — never share it publicly or put it in frontend code)
 
