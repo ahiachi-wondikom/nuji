@@ -25,6 +25,7 @@ const STATUS = {
 };
 
 const PROMPT_LANGS = ['Igbo', 'Yoruba', 'Hausa', 'Pidgin', 'English'];
+const PROMPT_CATS = ['Greetings', 'Hospitality', 'Health', 'Business', 'Money', 'Family', 'Work', 'Travels', 'Transportation'];
 
 const TAGS = [
   { tag: 'IGBO', label: 'Igbo', color: '#059669', bg: '#f0fdf4' },
@@ -34,6 +35,124 @@ const TAGS = [
   { tag: 'ENG', label: 'English', color: '#6b7280', bg: '#f3f4f6' }
 ];
 
+
+// ---------- audio quality validation (same standard as the contributor Speak page) ----------
+function fftInPlace(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cwr = 1, cwi = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const ur = re[i + j], ui = im[i + j];
+        const vr = re[i + j + len / 2] * cwr - im[i + j + len / 2] * cwi;
+        const vi = re[i + j + len / 2] * cwi + im[i + j + len / 2] * cwr;
+        re[i + j] = ur + vr; im[i + j] = ui + vi;
+        re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
+        const nw = cwr * wr - cwi * wi; cwi = cwr * wi + cwi * wr; cwr = nw;
+      }
+    }
+  }
+}
+
+async function analyzeAudio(blob) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const sr = buf.sampleRate;
+    const ch = buf.getChannelData(0);
+    ctx.close();
+
+    let sum = 0, zc = 0, prev = 0, n = 0, active = 0;
+    const step = Math.max(1, Math.floor(ch.length / 60000));
+    for (let i = 0; i < ch.length; i += step) { const v = ch[i]; sum += v * v; if (Math.abs(v) > 0.01) active++; if ((v >= 0) !== (prev >= 0)) zc++; prev = v; n++; }
+    const rms = Math.sqrt(sum / (n || 1));
+    const zcr = zc / (n || 1);
+
+    const N = 1024, hop = 512;
+    const frameCount = Math.max(0, Math.floor((ch.length - N) / hop) + 1);
+    const energies = [], flatArr = [], bandArr = [], zcrArr = [];
+    const re = new Float64Array(N), im = new Float64Array(N);
+    const binHz = sr / N;
+    const loBin = Math.max(2, Math.round(80 / binHz)), hiBin = Math.min(N / 2 - 1, Math.round(3500 / binHz));
+    for (let f = 0; f < frameCount; f++) {
+      const off = f * hop;
+      let e = 0, z = 0, pv = 0;
+      for (let i = 0; i < N; i++) {
+        const v = ch[off + i];
+        re[i] = v * (0.54 - 0.46 * Math.cos(2 * Math.PI * i / (N - 1)));
+        im[i] = 0;
+        e += v * v;
+        if ((v >= 0) !== (pv >= 0)) z++;
+        pv = v;
+      }
+      e = Math.sqrt(e / N);
+      energies.push(e);
+      zcrArr.push(z / N);
+      fftInPlace(re, im);
+      let total = 0, band = 0, logSum = 0, linSum = 0;
+      for (let k = 1; k < N / 2; k++) {
+        const p = re[k] * re[k] + im[k] * im[k];
+        total += p;
+        if (k >= loBin && k <= hiBin) band += p;
+        const pp = p + 1e-12;
+        logSum += Math.log(pp); linSum += pp;
+      }
+      const bins = N / 2 - 1;
+      flatArr.push(Math.exp(logSum / bins) / ((linSum / bins) || 1e-12));
+      bandArr.push(total ? band / total : 0);
+    }
+
+    const sorted = [...energies].sort((a, b) => a - b);
+    const pct = (q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : 0;
+    const floor = Math.max(pct(0.2), 0.0015);
+    const thr = Math.max(floor * 3, 0.004);
+
+    let activeFrames = 0, voicedFrames = 0, flatSum = 0, bandSum = 0;
+    for (let f = 0; f < frameCount; f++) {
+      if (energies[f] <= thr) continue;
+      activeFrames++;
+      if (zcrArr[f] < 0.2) voicedFrames++;
+      flatSum += flatArr[f];
+      bandSum += bandArr[f];
+    }
+    const activeFracV = frameCount ? activeFrames / frameCount : 0;
+    const voicedFrac = frameCount ? voicedFrames / frameCount : 0;
+    const flatness = activeFrames ? flatSum / activeFrames : 1;
+    const bandRatio = activeFrames ? bandSum / activeFrames : 0;
+    const dynamics = pct(0.9) / Math.max(pct(0.1), floor * 0.5, 1e-4);
+
+    const voice = {
+      activeFrac: activeFracV, voicedFrac, flatness, bandRatio, dynamics,
+      ok: activeFracV >= 0.18 && voicedFrac >= 0.12 && flatness <= 0.4 && bandRatio >= 0.45 && dynamics >= 2.2
+    };
+    return { duration: buf.duration, rms, zcr, activeFrac: n ? active / n : 0, n, voice };
+  } catch { return null; }
+}
+
+function audioProblems(m) {
+  if (!m) return [];
+  const p = [];
+  if (m.duration < 3) p.push('too_short');
+  if (m.n > 0 && (m.activeFrac < 0.05 || m.rms < 0.005)) p.push('silent');
+  if (m.n > 0 && (m.rms > 0.35 || (m.zcr > 0.4 && m.rms > 0.06))) p.push('noisy');
+  if (m.voice && !m.voice.ok) p.push('no_voice');
+  return p;
+}
+const AUDIO_ERROR_MSG = {
+  too_short: 'Recording is under 3 seconds — record a little longer and try again.',
+  silent: 'No voice detected (silent recording). Check the microphone and try again.',
+  noisy: 'Extreme background noise detected. Try recording in a quieter spot.',
+  no_voice: 'No clear human voice detected in this recording. Background noise alone cannot be accepted — please re-record or upload a file with a real voice.',
+  bad_audio: 'This audio file could not be analyzed. Please try a different file or re-record.'
+};
 // ---------- CSV / PDF export ----------
 const csvEscape = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const downloadCSV = (name, rows) => {
@@ -86,9 +205,80 @@ const TABS = [
 ];
 
 // ================= DETAIL MODAL (full review console) =================
+// ---------- code-switch word tagger (used in Submissions modal) ----------
+function parseAnnotation(str){
+  const segs=[]; const re=/\[([A-Z]+)\]([\s\S]*?)\[\/\1\]/g; let m;
+  while((m=re.exec(str||''))){ m[2].trim().split(/\s+/).filter(Boolean).forEach(w=>segs.push({word:w,tag:m[1]})); }
+  return segs;
+}
+function buildAnn(segments){
+  const out=[]; let cur=null;
+  segments.forEach(({word,tag})=>{ const t=tag||'UNK';
+    if(cur&&cur.tag===t) cur.text+=' '+word; else { if(cur) out.push(cur); cur={tag:t,text:word}; } });
+  if(cur) out.push(cur);
+  return out;
+}
+function WordTagger({ words, initial, readOnly, onSave }){
+  const [segments,setSegments]=useState(()=> (initial? parseAnnotation(initial): words.map(w=>({word:w,tag:null}))));
+  const [selectedTag,setSelectedTag]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const tagColor=(t)=>TAGS.find(x=>x.tag===t);
+  const preview=buildAnn(segments).map(s=>`[${s.tag}]${s.text}[/${s.tag}]`).join(' ');
+  const switchPoints=Math.max(0, buildAnn(segments).length-1);
+  if(readOnly){
+    return (
+      <div style={{display:'flex',flexWrap:'wrap',gap:6,lineHeight:2}}>
+        {segments.map((s,i)=>{ const st=tagColor(s.tag);
+          return <span key={i} style={{padding:'4px 10px',borderRadius:6,border:st?`2px solid ${st.color}`:'2px solid #e5e7eb',background:st?st.bg:'#fff',color:st?st.color:'#374151',fontSize:14,fontWeight:st?700:400}}>
+            {s.word}{s.tag&&<span style={{fontSize:9,marginLeft:4,opacity:.8}}>{s.tag}</span>}
+          </span>; })}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:6,lineHeight:2,marginBottom:12}}>
+        {segments.map((s,i)=>{ const st=tagColor(s.tag);
+          return <button key={i} onClick={()=>{ if(!selectedTag)return; setSegments(p=>p.map((x,k)=>k===i?{...x,tag:x.tag===selectedTag?null:selectedTag}:x)); }}
+            style={{padding:'4px 10px',borderRadius:6,border:st?`2px solid ${st.color}`:'2px solid #e5e7eb',background:st?st.bg:'#fff',color:st?st.color:'#374151',fontSize:14,fontWeight:st?700:400,cursor:selectedTag?'pointer':'default'}}>
+            {s.word}{s.tag&&<span style={{fontSize:9,marginLeft:4,opacity:.8}}>{s.tag}</span>}
+          </button>; })}
+      </div>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:8}}>
+        <p style={{fontSize:13,fontWeight:700,color:'#374151',margin:0}}>Select language tag:</p>
+        <div style={{display:'flex',gap:8}}>
+          {selectedTag&&<button className="admin-export-btn" onClick={()=>setSegments(p=>p.map(x=>({...x,tag:selectedTag})))}>Tag all as {selectedTag}</button>}
+          <button className="admin-export-btn" onClick={()=>setSegments(p=>p.map(x=>({...x,tag:null})))}>Clear all</button>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+        {TAGS.map(t=>(
+          <button key={t.tag} onClick={()=>setSelectedTag(selectedTag===t.tag?null:t.tag)}
+            className="admin-chip"
+            style={{padding:'8px 16px',borderRadius:999,border:selectedTag===t.tag?`2px solid ${t.color}`:'2px solid #e5e7eb',background:selectedTag===t.tag?t.bg:'#fff',color:selectedTag===t.tag?t.color:'#374151',fontSize:13,fontWeight:700,cursor:'pointer'}}>
+            [{t.tag}] {t.label}
+          </button>))}
+      </div>
+      {segments.some(s=>s.tag)&&(
+        <div className="admin-modal-section" style={{marginBottom:12}}>
+          <h5>Annotation preview · {switchPoints} switch point{switchPoints!==1?'s':''}</h5>
+          <p style={{fontFamily:'monospace',fontSize:12}}>{preview}</p>
+        </div>)}
+      <button className="btn btn-primary" disabled={saving||!segments.some(s=>s.tag)} onClick={async()=>{ setSaving(true); await onSave(preview); setSaving(false); }}>
+        {saving?'Saving…':'Save annotation'}
+      </button>
+    </div>
+  );
+}
+
 function DetailModal({ item, onClose, onChanged }) {
   const [translation, setTranslation] = useState(item.translation || '');
   const [annotation, setAnnotation] = useState(item.annotation || '');
+  const [savedAnn, setSavedAnn] = useState(null);
+  const words = (item.fullText || item.text || '').split(/\s+/).filter(Boolean);
+  const effStatus = savedAnn ? savedAnn.status : (item.annotation_status || 'pending');
+  const effAnn = savedAnn ? savedAnn.annotation : (item.annotation || '');
+  const isAnnotated = effStatus === 'annotated' && !!effAnn;
   const [status, setStatus] = useState(item.status || 'pending');
   const [msg, setMsg] = useState('');
   const [extraAudio, setExtraAudio] = useState(null);
@@ -124,11 +314,26 @@ function DetailModal({ item, onClose, onChanged }) {
   };
   const stopRec = () => { if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop(); };
 
-  const attachBlob = async (blob) => {
+   const attachBlob = async (blob) => {
     setUploading(true);
+    const meta = await analyzeAudio(blob);
+    if (!meta) {
+      setUploading(false);
+      setMsg(AUDIO_ERROR_MSG.bad_audio);
+      setTimeout(() => setMsg(''), 2500);
+      return;
+    }
+    const probs = audioProblems(meta);
+    if (probs.length) {
+      setUploading(false);
+      setMsg(AUDIO_ERROR_MSG[probs[0]]);
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
     const fd = new FormData();
     fd.append('id', item.id);
     fd.append('audio', blob, 'recording.webm');
+    fd.append('duration', String(meta.duration));
     const r = await api.adminUploadAudio(fd);
     setUploading(false);
     if (r && r.ok) { setExtraAudio(r.audioUrl); setMsg('Voice attached ✓ — you can now approve'); onChanged(); setTimeout(() => setMsg(''), 2200); }
@@ -141,8 +346,10 @@ function DetailModal({ item, onClose, onChanged }) {
     attachBlob(f);
   };
 
+  const [text, setText] = useState(item.fullText || item.text || '');
+
   const saveMeta = async () => {
-    await api.adminUpdateMeta({ id: item.id, translation, annotation });
+    await api.adminUpdateMeta({ id: item.id, translation, text });
     setMsg('Saved ✓'); onChanged(); setTimeout(() => setMsg(''), 1500);
   };
   const setStatusAnd = async (st) => { await api.adminSetStatus(item.id, st); setStatus(st); onChanged(); };
@@ -152,7 +359,7 @@ function DetailModal({ item, onClose, onChanged }) {
     { label: 'Has text', ok: !!(item.fullText || item.text) },
     { label: 'Has voice', ok: !!item.hasAudio },
     { label: 'Has translation', ok: !!translation },
-    { label: 'Annotated', ok: !!annotation },
+    { label: 'Annotated', ok: !!isAnnotated },
     { label: 'Peer approved', ok: status === 'approved' }
   ];
 
@@ -176,12 +383,36 @@ function DetailModal({ item, onClose, onChanged }) {
           <div className="admin-modal-section"><h5>📝 Daily prompt</h5><p>{item.prompt}</p></div>
           <div className="admin-modal-section"><h5>💬 Contributor response {item.formality && <em style={{ textTransform: 'none' }}>· {item.formality}</em>}</h5><p>{item.fullText || item.text || '—'}</p></div>
 
+          <div style={{ marginBottom: 10 }}>
+            <h5 style={{ margin: '0 0 6px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px', color: '#77817a' }}>💬 Contributor response (editable)</h5>
+            <textarea className="admin-textarea" value={text} onChange={e => setText(e.target.value)} />
+          </div>
+
           {(item.hasAudio || extraAudio) ? (
             <div className="admin-modal-section">
               <h5>🎙 Voice recording · {fmtDur(item.duration)}</h5>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <AudioCell url={item.audioUrl || extraAudio} />
-                <span className="admin-muted" style={{ fontSize: 12 }}>Quality-checked on submission (≥3s, not silent, not noisy)</span>
+                <span className="admin-muted" style={{ fontSize: 12 }}>Current recording — re-record or replace below</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {recState === 'idle' ? (
+                  <button className="btn btn-secondary" onClick={startRec}><Mic size={15} /> Re-record voice</button>
+                ) : (
+                  <button className="btn" style={{ background: '#fee2e2', color: '#991b1b' }} onClick={stopRec}>
+                    <span style={{ width: 11, height: 11, background: '#991b1b', borderRadius: 2, display: 'inline-block' }} /> Stop · {fmtDur(recTime)}
+                  </button>
+                )}
+                {recBlob && (
+                  <>
+                    <AudioCell url={recUrl} />
+                    <button className="btn btn-primary" disabled={uploading} onClick={() => attachBlob(recBlob)}>{uploading ? 'Saving…' : 'Attach recording'}</button>
+                  </>
+                )}
+              </div>
+              <div style={{ marginTop: 12, borderTop: '1px dashed #e5e7eb', paddingTop: 10 }}>
+                <input type="file" accept="audio/*" ref={fileRef} style={{ fontSize: 12 }} />
+                <button className="btn btn-primary" style={{ marginTop: 8 }} disabled={uploading} onClick={uploadFile}>{uploading ? 'Uploading…' : 'Upload replacement audio'}</button>
               </div>
             </div>
           ) : (
@@ -220,12 +451,21 @@ function DetailModal({ item, onClose, onChanged }) {
             <textarea className="admin-textarea" value={translation} onChange={e => setTranslation(e.target.value)} placeholder="What does this mean in English? Be literal and natural." />
           </div>
 
-          {(item.langs || []).length > 1 && (
-            <div style={{ marginBottom: 10 }}>
-              <h5 style={{ margin: '0 0 6px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px', color: '#77817a' }}>🔀 Code-switch annotation {!item.annotation && <span style={{ color: '#7c3aed', textTransform: 'none' }}>— needs labelling</span>}</h5>
-              <textarea className="admin-textarea" style={{ fontFamily: 'monospace' }} value={annotation} onChange={e => setAnnotation(e.target.value)} placeholder="e.g. [PID]E don happen[/PID] [IGBO]kedu ka i mere[/IGBO]" />
-            </div>
-          )}
+          <div className="admin-modal-section" style={{ marginBottom: 10 }}>
+            <h5 style={{ margin: '0 0 6px', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.6px', color: '#77817a' }}>
+              🔀 Code-switch annotation {isAnnotated ? <span style={{ color: '#16a34a' }}>— saved ✅</span> : <span style={{ color: '#7c3aed' }}>— needs labelling</span>}
+            </h5>
+            <WordTagger
+              words={words}
+              initial={isAnnotated ? effAnn : ''}
+              readOnly={isAnnotated}
+              onSave={async (preview) => {
+                await api.adminUpdateMeta({ id: item.id, annotation: preview, annotationStatus: 'annotated' });
+                setSavedAnn({ status: 'annotated', annotation: preview });
+                setMsg('Annotation saved ✓'); onChanged(); setTimeout(() => setMsg(''), 1800);
+              }}
+            />
+          </div>
 
           {msg && <p style={{ color: '#166534', fontWeight: 700, fontSize: 13, margin: '6px 0' }}>{msg}</p>}
 
@@ -399,9 +639,10 @@ function Admin() {
   const [selected, setSelected] = useState(null);
   const [expandedUser, setExpandedUser] = useState(null);
   // prompts manager state
-  const [newPrompt, setNewPrompt] = useState({ text: '', language: 'Igbo' });
+  const [newPrompt, setNewPrompt] = useState({ text: '', language: 'English', category: 'Greetings' });
   const [bulkText, setBulkText] = useState('');
-  const [bulkLang, setBulkLang] = useState('Igbo');
+  const [bulkLang, setBulkLang] = useState('English');
+  const [bulkCat, setBulkCat] = useState('Greetings');
   const [promptMsg, setPromptMsg] = useState('');
   // digest
   const [digestMsg, setDigestMsg] = useState('');
@@ -691,10 +932,15 @@ function Admin() {
                   {PROMPT_LANGS.map(l => <option key={l}>{l}</option>)}
                 </select>
               </Field>
+              <Field label="Category">
+                <select value={newPrompt.category} onChange={e => setNewPrompt(p => ({ ...p, category: e.target.value }))}>
+                  {PROMPT_CATS.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </Field>
               <button className="btn btn-primary" style={{ marginTop: 10 }} onClick={async () => {
                 if (!newPrompt.text.trim()) return;
                 await api.adminAddPrompt(newPrompt);
-                setNewPrompt({ text: '', language: 'Igbo' });
+                setNewPrompt({ text: '', language: 'English', category: 'Greetings' });
                 setPromptMsg('Prompt added ✓'); api.adminPrompts().then(setPrompts); setTimeout(() => setPromptMsg(''), 1500);
               }}><Plus size={15} /> Add prompt</button>
               {promptMsg && <p style={{ color: '#166534', fontWeight: 700, fontSize: 13, marginTop: 8 }}>{promptMsg}</p>}
@@ -705,9 +951,12 @@ function Admin() {
                 <select value={bulkLang} onChange={e => setBulkLang(e.target.value)} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', font: 'inherit', fontSize: 13 }}>
                   {PROMPT_LANGS.map(l => <option key={l}>{l}</option>)}
                 </select>
+                <select value={bulkCat} onChange={e => setBulkCat(e.target.value)} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', font: 'inherit', fontSize: 13 }}>
+                  {PROMPT_CATS.map(c => <option key={c}>{c}</option>)}
+                </select>
                 <button className="btn btn-primary" onClick={async () => {
                   const lines = bulkText.split('\n');
-                  const r = await api.adminBulkPrompts({ lines, language: bulkLang });
+                  const r = await api.adminBulkPrompts({ lines, language: bulkLang, category: bulkCat });
                   setPromptMsg(r && r.ok ? `Imported ${r.count} prompts ✓` : 'Import failed');
                   setBulkText(''); api.adminPrompts().then(setPrompts); setTimeout(() => setPromptMsg(''), 2000);
                 }}><FileDown size={15} /> Import all</button>
@@ -720,6 +969,7 @@ function Admin() {
                 {(prompts || []).map(p => (
                   <div key={p.id} className="admin-mini-row" style={{ opacity: p.is_active ? 1 : .5 }}>
                     <span className="admin-chip">{p.language}</span>
+                    <span className="admin-chip" style={{ background: '#f5f3ff', color: '#7c3aed' }}>{p.category || 'Greetings'}</span>
                     <small className="admin-ellipsis" style={{ flex: 1 }}>{p.text}</small>
                     <button className="admin-mini-btn" title={p.is_active ? 'Deactivate' : 'Activate'} onClick={async () => { await api.adminTogglePrompt(p.id); api.adminPrompts().then(setPrompts); }}>{p.is_active ? <Check size={13} /> : <X size={13} />}</button>
                     <button className="admin-mini-btn" title="Delete" onClick={async () => { await api.adminDeletePrompt(p.id); api.adminPrompts().then(setPrompts); }}><Trash2 size={13} /></button>
