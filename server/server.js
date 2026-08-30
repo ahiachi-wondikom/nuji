@@ -14,14 +14,13 @@ import {
   levelInfo, totalSubs, BADGES, earnedBadges, activityPayload, bumpDay,
   rankOf, topLanguage, STATE_ZONES
 } from './db.js';
-import { getPrompt, allPrompts } from './prompts.js';
 
-// ---- prompts store (admin-managed) ----
+// ---- prompts store (admin-managed, database only) ----
 {
   const d = getDB();
   if (!d.prompts) {
-    d.prompts = allPrompts().map((p, i) => ({ id: i + 1, language: p.language, text: p.text, is_active: true }));
-    d.promptSeq = d.prompts.length + 1;
+    d.prompts = [];
+    d.promptSeq = 1;
     save();
   }
 }
@@ -49,6 +48,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+// friendly root so the Render URL shows a status instead of "Cannot GET /"
+app.get('/', (req, res) => res.json({ ok: true, service: 'nuji-api', try: ['/api/leaderboard', '/api/states', '/api/stats'] }));
 
 // ---------- voice recording uploads ----------
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -161,12 +163,13 @@ app.get('/api/prompts', (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
   // RATIONING: max 2 contributors per prompt, then rotate
+  // Prompts are English source sentences — same prompt for every language (contributors translate it)
   const db = getDB();
-  const pool = db.prompts.filter(p => p.language === language && p.is_active);
+  const pool = db.prompts.filter(p => p.is_active);
   let p = pool.filter(x => (x.uses || 0) < 2).sort((a, b) => (a.uses - b.uses) || (a.id - b.id))[0]
          || pool.sort((a, b) => (a.uses - b.uses) || (a.id - b.id))[0];
   if (p) { p.uses = (p.uses || 0) + 1; save(); return res.json({ text: p.text, language, id: p.id, uses: p.uses }); }
-  res.json({ text: getPrompt(language, seed), language });
+  res.json({ text: '', language });
 });
 
 // ================= CONTRIBUTIONS =================
@@ -179,6 +182,7 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
   const hasText = !!String(text || '').trim();
   const hasVoice = !!req.file;
   if (!hasText && !hasVoice) return res.status(400).json({ error: 'Nothing to submit' });
+  if (hasText && String(text).trim().split(/\s+/).length < 3) return res.status(400).json({ error: 'too_short_text' });
 
   // quality gate
   const duration = Number(body.duration) || 0;
@@ -241,12 +245,21 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
 // A clip awaiting review: has audio, fewer than 3 reviews
 app.get('/api/clips', (req, res) => {
   const language = req.query.language;
-  const db = getDB();
-  const clip = [...db.contributions]
-    .reverse()
-    .find(c => c.audioUrl && (c.status || 'pending') === 'pending' && c.language === language && c.reviews.length < 3 && c.phone !== normalizePhone(req.query.phone));
+  const skip = parseInt(req.query.skip || '0', 10);
+  const exclude = req.query.exclude || '';
+  const reviewerPhone = req.query.phone ? normalizePhone(req.query.phone) : '';
+  const pool = [...getDB().contributions].reverse()
+    .filter(c =>
+      c.audioUrl &&
+      (c.status || 'pending') === 'pending' &&
+      (c.reviews || []).length < 3 &&
+      c.phone !== reviewerPhone &&
+      c.id !== exclude &&
+      !(c.reviews || []).some(r => r.phone && r.phone === reviewerPhone)
+    );
+  const clip = pool.length ? pool[Math.min(skip, pool.length - 1)] : null;
   if (!clip) return res.json(null);
-  res.json({ id: clip.id, audioUrl: clip.audioUrl, prompt: clip.prompt || clip.text });
+  res.json({ id: clip.id, audioUrl: clip.audioUrl, prompt: clip.prompt || '', text: clip.text || '' });
 });
 
 app.post('/api/reviews', (req, res) => {
@@ -389,11 +402,12 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       text: (c.text || '').slice(0, 120), fullText: c.text || '', hasAudio: !!c.audioUrl, audioUrl: c.audioUrl || null,
       points: c.points || 0, duration: c.duration || 0, status: c.status || 'pending',
       hasTranslation: !!c.translation, translation: c.translation || '', annotation: c.annotation || '',
+      annotation_status: c.annotationStatus || 'pending',
       speaker: c.speaker || {}, langs: c.langs || [], formality: c.formality || '',
       reviews: (c.reviews || []).length, maxReviews: 3, createdAt: c.createdAt
     })),
     topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
-    allUsers: [...U].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 200).map(u => ({
+    allUsers: [...U].sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 200).map(u => ({
       phone: u.phone, nickname: u.nickname || '', state: u.state || '', lga: u.lga || '', age: u.age || '',
       gender: u.gender || '', languages: u.languages || [], contributionLang: u.contributionLang || 'Igbo',
       kind: u.profileKind || 'none', refCode: u.refCode || '', referredBy: u.referredBy || '',
@@ -422,6 +436,7 @@ app.post('/api/admin/meta', requireAdmin, (req, res) => {
   if (typeof translation === 'string') c.translation = translation;
   if (typeof annotation === 'string') c.annotation = annotation;
   if (typeof (req.body || {}).annotationStatus === 'string') c.annotationStatus = req.body.annotationStatus;
+  if (typeof (req.body || {}).text === 'string') c.text = req.body.text;
   save();
   res.json({ ok: true });
 });
@@ -481,19 +496,19 @@ app.get('/api/admin/analytics', requireAdmin, (req, res) => {
 // ================= ADMIN: PROMPTS MANAGER =================
 app.get('/api/admin/prompts', requireAdmin, (req, res) => res.json([...getDB().prompts].reverse().slice(0, 300)));
 app.post('/api/admin/prompts', requireAdmin, (req, res) => {
-  const { text, language } = req.body || {};
+  const { text, language, category } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'Text required' });
   const db = getDB();
-  db.prompts.push({ id: db.promptSeq++, language: language || 'Igbo', text: text.trim(), is_active: true });
+  db.prompts.push({ id: db.promptSeq++, language: language || 'Igbo', category: category || 'Greetings', text: text.trim(), is_active: true });
   save();
   res.json({ ok: true });
 });
 app.post('/api/admin/prompts/bulk', requireAdmin, (req, res) => {
-  const { lines = [], language = 'Igbo' } = req.body || {};
+  const { lines = [], language = 'Igbo', category = 'Greetings' } = req.body || {};
   const rows = lines.map(l => String(l || '').trim()).filter(l => l.length > 3);
   if (!rows.length) return res.status(400).json({ error: 'No valid lines' });
   const db = getDB();
-  rows.forEach(t => db.prompts.push({ id: db.promptSeq++, language, text: t, is_active: true }));
+  rows.forEach(t => db.prompts.push({ id: db.promptSeq++, language, category, text: t, is_active: true }));
   save();
   res.json({ ok: true, count: rows.length });
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowRight, Check, ChevronDown, CircleHelp, Headphones, LockKeyhole, Mail, Menu, Mic, Pause, Play, RotateCcw, SkipForward, Trophy, Volume2, X, User, Clock, Award, Send, Phone, Music, MessageCircle, MapPin, Flag, BarChart3, Users, Layers, Globe, Zap, Lock, Type, LogOut } from "lucide-react";
 import { api } from './api.js';
+import { queuePush, queueAll, queueDelete, queueCount } from './offlineQueue.js';
 import Admin from './admin.jsx';
 import nuji10 from './assets/nuji14.jpg';
 import nuji11 from './assets/nuji13.jpg';
@@ -49,35 +50,129 @@ const normalizeNaija = (p) => {
 const validNaijaPhone = (p) => /^0(70|80|81|90|91|93)\d{8}$/.test(p);
 
 // ---------- audio quality validation (runs in the browser before upload) ----------
+// Small in-place radix-2 FFT (size must be a power of 2) — used to detect human voice
+function fftInPlace(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cwr = 1, cwi = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const ur = re[i + j], ui = im[i + j];
+        const vr = re[i + j + len / 2] * cwr - im[i + j + len / 2] * cwi;
+        const vi = re[i + j + len / 2] * cwi + im[i + j + len / 2] * cwr;
+        re[i + j] = ur + vr; im[i + j] = ui + vi;
+        re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
+        const nw = cwr * wr - cwi * wi; cwi = cwr * wi + cwi * wr; cwr = nw;
+      }
+    }
+  }
+}
+
+// Full analysis of the finished recording: level + frame-based HUMAN VOICE detection.
+// Rejects empty recordings and background noise (fans, traffic, hiss, TV static) —
+// only real speech has voiced frames, a peaky spectrum, voice-band energy and syllable dynamics.
 async function analyzeAudio(blob) {
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     const ctx = new AC();
     const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const sr = buf.sampleRate;
     const ch = buf.getChannelData(0);
-    let sum = 0, zc = 0, prev = 0, n = 0;
+    ctx.close();
+
+    // overall level (same metrics as before)
+    let sum = 0, zc = 0, prev = 0, n = 0, active = 0;
     const step = Math.max(1, Math.floor(ch.length / 60000));
-    for (let i = 0; i < ch.length; i += step) { const v = ch[i]; sum += v * v; if ((v >= 0) !== (prev >= 0)) zc++; prev = v; n++; }
+    for (let i = 0; i < ch.length; i += step) { const v = ch[i]; sum += v * v; if (Math.abs(v) > 0.01) active++; if ((v >= 0) !== (prev >= 0)) zc++; prev = v; n++; }
     const rms = Math.sqrt(sum / (n || 1));
     const zcr = zc / (n || 1);
-    ctx.close();
-    return { duration: buf.duration, rms, zcr };
+
+    // frame-based voice detection (21 ms frames, 50% overlap)
+    const N = 1024, hop = 512;
+    const frameCount = Math.max(0, Math.floor((ch.length - N) / hop) + 1);
+    const energies = [], flatArr = [], bandArr = [], zcrArr = [];
+    const re = new Float64Array(N), im = new Float64Array(N);
+    const binHz = sr / N;
+    const loBin = Math.max(2, Math.round(80 / binHz)), hiBin = Math.min(N / 2 - 1, Math.round(3500 / binHz));
+    for (let f = 0; f < frameCount; f++) {
+      const off = f * hop;
+      let e = 0, z = 0, pv = 0;
+      for (let i = 0; i < N; i++) {
+        const v = ch[off + i];
+        re[i] = v * (0.54 - 0.46 * Math.cos(2 * Math.PI * i / (N - 1)));
+        im[i] = 0;
+        e += v * v;
+        if ((v >= 0) !== (pv >= 0)) z++;
+        pv = v;
+      }
+      e = Math.sqrt(e / N);
+      energies.push(e);
+      zcrArr.push(z / N);
+      fftInPlace(re, im);
+      let total = 0, band = 0, logSum = 0, linSum = 0;
+      for (let k = 1; k < N / 2; k++) {
+        const p = re[k] * re[k] + im[k] * im[k];
+        total += p;
+        if (k >= loBin && k <= hiBin) band += p;
+        const pp = p + 1e-12;
+        logSum += Math.log(pp); linSum += pp;
+      }
+      const bins = N / 2 - 1;
+      flatArr.push(Math.exp(logSum / bins) / ((linSum / bins) || 1e-12)); // 1 = flat noise, ~0 = peaky voice
+      bandArr.push(total ? band / total : 0);
+    }
+
+    // adaptive noise floor (20th percentile of frame energy)
+    const sorted = [...energies].sort((a, b) => a - b);
+    const pct = (q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : 0;
+    const floor = Math.max(pct(0.2), 0.0015);
+    const thr = Math.max(floor * 3, 0.004);
+
+    let activeFrames = 0, voicedFrames = 0, flatSum = 0, bandSum = 0;
+    for (let f = 0; f < frameCount; f++) {
+      if (energies[f] <= thr) continue;
+      activeFrames++;
+      if (zcrArr[f] < 0.2) voicedFrames++;          // voiced speech: low zero-crossing rate
+      flatSum += flatArr[f];
+      bandSum += bandArr[f];
+    }
+    const activeFracV = frameCount ? activeFrames / frameCount : 0;
+    const voicedFrac = frameCount ? voicedFrames / frameCount : 0;
+    const flatness = activeFrames ? flatSum / activeFrames : 1;
+    const bandRatio = activeFrames ? bandSum / activeFrames : 0;
+    const dynamics = pct(0.9) / Math.max(pct(0.1), floor * 0.5, 1e-4); // speech varies, steady noise doesn't
+
+    const voice = {
+      activeFrac: activeFracV, voicedFrac, flatness, bandRatio, dynamics,
+      ok: activeFracV >= 0.18 && voicedFrac >= 0.12 && flatness <= 0.4 && bandRatio >= 0.45 && dynamics >= 2.2
+    };
+    return { duration: buf.duration, rms, zcr, activeFrac: n ? active / n : 0, n, voice };
   } catch { return null; }
 }
-// industry-style heuristics: too short / silent mic / extreme noise
-// (metrics come from LIVE mic monitoring, so they work in every browser)
+// industry-style heuristics: too short / silent mic / extreme noise / no human voice
+// (voice metrics come from analysing the FINISHED recording, so they can't be faked)
 function audioProblems(m) {
   if (!m) return [];
   const p = [];
   if (m.duration < 3) p.push('too_short');
   if (m.n > 0 && (m.activeFrac < 0.05 || m.rms < 0.005)) p.push('silent');
   if (m.n > 0 && (m.rms > 0.35 || (m.zcr > 0.4 && m.rms > 0.06))) p.push('noisy');
+  if (m.voice && !m.voice.ok) p.push('no_voice');
   return p;
 }
 const AUDIO_ERROR_MSG = {
   too_short: 'Recording is under 3 seconds — speak a little longer and try again.',
   silent: 'No voice detected (silent recording). Check your microphone and try again.',
-  noisy: 'Extreme background noise detected. Move to a quieter spot and try again.'
+  noisy: 'Extreme background noise detected. Move to a quieter spot and try again.',
+  no_voice: 'We could not detect a clear human voice in this recording. Please speak clearly into the microphone and try again — background noise alone is not accepted.',
+  bad_audio: 'This audio file could not be accepted. Please record again in the app and try once more.'
 };
 const fmtDur = (s) => `0:${String(Math.max(0, Math.round(s))).padStart(2, '0')}`;
 
@@ -212,6 +307,41 @@ function App() {
 
   const logout = () => { setPhone(''); setProfile(null); navigate('home'); };
 
+  // ---- offline sync manager (queue flushes on 'online', on start, every 30s) ----
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [pendingSync, setPendingSync] = useState(0);
+  const syncQueue = useCallback(async () => {
+    if (!navigator.onLine) return;
+    const items = await queueAll().catch(() => []);
+    for (const it of items) {
+      let ok = false;
+      try {
+        if (it.blob) {
+          const fd = new FormData();
+          fd.append('audio', it.blob, 'recording.webm');
+          fd.append('data', JSON.stringify(it.data));
+          const r = await api.trySubmitAudio(fd);
+          ok = !!r && r.ok;
+        } else {
+          const r = await api.trySubmit(it.data);
+          ok = !!r && r.ok;
+        }
+      } catch { ok = false; }
+      if (ok) await queueDelete(it.id).catch(() => {});
+      else break;
+    }
+    setPendingSync(await queueCount().catch(() => 0));
+  }, []);
+  useEffect(() => {
+    const on = () => { setOnline(true); syncQueue(); };
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    syncQueue();
+    const iv = setInterval(syncQueue, 30000);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(iv); };
+  }, [syncQueue]);
+
   useEffect(() => { const onPop = () => setPage(routeMap[window.location.pathname] || 'home'); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop); }, []);
   useEffect(() => { document.title = `Nuji — ${page === 'home' ? 'Voices build the future' : page[0].toUpperCase() + page.slice(1)}`; }, [page]);
 
@@ -220,17 +350,22 @@ function App() {
       <a className="skip-link" href="#main">Skip to main content</a>
       <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} points={profileData.points} />
       <main id="main">
-        {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} />}
-        {page === 'about' && <About navigate={navigate} />}
+        {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} hasProfile={hasProfile} />}
+        {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} />}
         {page === 'join' && <Join navigate={navigate} language={language} setLanguage={setLanguage} phone={phone} setPhone={setPhone} onSaved={refreshProfile} />}
-        {page === 'contribute' && <Contribute language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
+        {page === 'contribute' && <Contribute language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} online={online} />}
         {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
         {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
         {page === 'admin' && <Admin />}
       </main>
-      {page !== 'admin' && <Footer navigate={navigate} />}
+      {page !== 'admin' && <Footer navigate={navigate} hasProfile={hasProfile} />}
+      {pendingSync > 0 && (
+        <div className="offline-banner">
+          {online ? '🔄 Uploading your offline contributions…' : `📴 Offline mode — ${pendingSync} contribution${pendingSync !== 1 ? 's' : ''} saved on this device, will sync automatically when you're online`}
+        </div>
+      )}
     </div>
   );
 }
@@ -247,7 +382,7 @@ function Nav({ page, menuOpen, setMenuOpen, navigate, hasProfile, points }) {
         <div className="nav-actions">
           <button className="language-nav"><span className="dot"/> Igbo <ChevronDown size={16}/></button>
           {hasProfile && <button className="points-pill" onClick={() => navigate('profile')} aria-label="View points"><Award size={14}/> {points}</button>}
-          <button className="btn btn-primary nav-cta" onClick={() => navigate('join')}>Contribute <ArrowRight size={16}/></button>
+          <button className="btn btn-primary nav-cta" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute <ArrowRight size={16}/></button>
           {hasProfile && <button className={page === 'profile' ? 'profile-avatar active' : 'profile-avatar'} onClick={() => navigate('profile')} aria-label="My profile"><User size={17}/></button>}
           <button className="menu-btn" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={23}/></button>
         </div>
@@ -259,12 +394,12 @@ function Nav({ page, menuOpen, setMenuOpen, navigate, hasProfile, points }) {
         {links.map(([key,label], i) => <button key={key} onClick={() => navigate(key)}><span>0{i + 1}</span>{label}<ArrowRight size={18}/></button>)}
         {hasProfile && <button onClick={() => navigate('profile')}><span>0{links.length + 1}</span>My Profile<ArrowRight size={18}/></button>}
       </div>
-      <button className="btn btn-primary mobile-cta" onClick={() => navigate('join')}>Start contributing <ArrowRight size={17}/></button>
+      <button className="btn btn-primary mobile-cta" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start contributing <ArrowRight size={17}/></button>
     </div>
   </>;
 }
 
-function Home({ navigate, language, setLanguage }) {
+function Home({ navigate, language, setLanguage, hasProfile }) {
   return <>
     <section className="hero wave-bg">
       <div className="container hero-grid">
@@ -272,7 +407,7 @@ function Home({ navigate, language, setLanguage }) {
           <div className="eyebrow"><span className="pulse-dot"/> Made with voices across Nigeria</div>
           <h1>Technology that <em>understands</em> home.</h1>
           <p>Help build voice data in the languages Nigerians actually use — at the market, with family, and everywhere in between.</p>
-          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate('contribute')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
+          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
           <div className="hero-note"><span className="avatars"><i>A</i><i>C</i><i>T</i></span><span>Join people making language visible.</span></div>
         </div>
         <div className="sound-stage" aria-label="Example recording contribution">
@@ -297,12 +432,12 @@ function Home({ navigate, language, setLanguage }) {
 
     <section className="section language-section layered-surface">
       <div className="container"><div className="section-heading"><div><div className="eyebrow">Choose a language</div><h2>Start with the words you know.</h2></div><p>Every phrase helps make the next interaction feel a little more familiar.</p></div>
-      <div className="language-grid">{languages.map(lang => <button className={`language-card ${lang.color}`} onClick={() => {setLanguage(lang);navigate('join')}} key={lang.name}><div className="lang-card-top"><span>{lang.name}</span><ArrowRight size={20}/></div><div className="lang-native">{lang.native}</div><p>“{lang.sample.replace(/[“”]/g,'')}”</p><div className="card-lines"/></button>)}</div></div>
+      <div className="language-grid">{languages.map(lang => <button className={`language-card ${lang.color}`} onClick={() => {setLanguage(lang);navigate(hasProfile ? 'contribute' : 'join')}} key={lang.name}><div className="lang-card-top"><span>{lang.name}</span><ArrowRight size={20}/></div><div className="lang-native">{lang.native}</div><p>“{lang.sample.replace(/[“”]/g,'')}”</p><div className="card-lines"/></button>)}</div></div>
     </section>
 
     <section className="section contribution-section">
       <div className="container"><div className="contribute-heading"><div className="eyebrow ink">Three ways to help</div><h2>Small moments. <em>Real</em> impact.</h2></div><div className="path-grid">
-        <Path icon={<Mic/>} number="01" title="Speak a sentence" text="Read short prompts aloud in the language you use every day." cta="Start speaking" action={() => navigate('join')} tone="green"/>
+        <Path icon={<Mic/>} number="01" title="Speak a sentence" text="Read short prompts aloud in the language you use every day." cta="Start speaking" action={() => navigate(hasProfile ? 'contribute' : 'join')} tone="green"/>
         <Path icon={<Headphones/>} number="02" title="Listen and validate" text="Help make sure recordings sound natural and clear." cta="Start listening" action={() => navigate('listen')} tone="green"/>
         <Path icon={<Volume2/>} number="03" title="Build the archive" text="Each contribution protects the way our communities speak." cta="See progress" action={() => navigate('leaderboard')} tone="green"/>
       </div></div>
@@ -319,16 +454,16 @@ function Home({ navigate, language, setLanguage }) {
           <div className="eyebrow">Rooted in culture</div>
           <h2>Not textbook language. <em>Life</em> as it is spoken.</h2>
           <p>From Lagos to Kano and Enugu, everyday voices carry expressions, humour, memory, and place. Nuji gives those voices a place in the technologies being built now.</p>
-          <button className="text-action" onClick={() => navigate('join')}>Contribute a sentence <ArrowRight size={17}/></button>
+          <button className="text-action" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute a sentence <ArrowRight size={17}/></button>
         </div>
       </div>
     </section>
 
-    <section className="final-cta"><div className="container final-inner"><div><div className="eyebrow">Your turn</div><h2>Your voice belongs<br/>in the dataset.</h2></div><button className="btn btn-light" onClick={() => navigate('join')}>Contribute now <ArrowRight size={18}/></button></div></section>
+    <section className="final-cta"><div className="container final-inner"><div><div className="eyebrow">Your turn</div><h2>Your voice belongs<br/>in the dataset.</h2></div><button className="btn btn-light" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute now <ArrowRight size={18}/></button></div></section>
   </>;
 }
 
-function About({ navigate }) {
+function About({ navigate, hasProfile }) {
   const privacy = [
     'Your voice recordings are used only to train Nigerian language AI models',
     'We never sell your data to third parties',
@@ -349,7 +484,7 @@ function About({ navigate }) {
             <div className="eyebrow">About Nuji</div>
             <h1>Technology that speaks<br /><em>your language.</em></h1>
             <p>Why should AI only work for a few of the world's languages? Our language is our story, our community, our culture. Nuji is building the datasets we want to see in the world.</p>
-            <button className="btn btn-primary" onClick={() => navigate('join')}>Start contributing <ArrowRight size={18} /></button>
+            <button className="btn btn-primary" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start contributing <ArrowRight size={18} /></button>
           </div>
           <div className="about-mark">
             <div className="market-woman-svg">
@@ -412,7 +547,7 @@ function About({ navigate }) {
             <h2>Every voice brings<br />us one step closer.</h2>
             <p>Every sentence you speak or type brings Nigerian language AI one step closer to reality.</p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate('join')}>Start Contributing <ArrowRight size={18} /></button>
+          <button className="btn btn-light" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start Contributing <ArrowRight size={18} /></button>
         </div>
         <p className="about-signoff">Built for the people. Powered by their voice. 🇳🇬</p>
       </section>
@@ -849,7 +984,7 @@ const exampleResponses = [
 ];
 const formalityLevels = ['Very Casual', 'Normal', 'Formal'];
 
-function Contribute({ language, setLanguage, phone, refreshProfile }) {
+function Contribute({ language, setLanguage, phone, refreshProfile, navigate, online }) {
   const [textResponse, setTextResponse] = useState('');
   const [recStage, setRecStage] = useState('idle'); // idle | recording | recorded
   const [time, setTime] = useState(0);
@@ -864,6 +999,8 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
   const [audioMeta, setAudioMeta] = useState(null);
   const [audioError, setAudioError] = useState('');
   const [submitError, setSubmitError] = useState('');
+  const [savedOffline, setSavedOffline] = useState(false);
+  const [breakChoice, setBreakChoice] = useState(false);
   const [promptText, setPromptText] = useState(language.sample);
   const recRef = useRef(null);
   const startTsRef = useRef(0);
@@ -915,19 +1052,25 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
       const rec = new MediaRecorder(stream);
       const chunks = [];
       rec.ondataavailable = e => chunks.push(e.data);
-      rec.onstop = () => {
+      rec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         if (timer) clearInterval(timer);
         if (actx) actx.close().catch(() => {});
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-        const n = stats.n || 0;
-        const meta = {
-          duration: (Date.now() - startTsRef.current) / 1000,
-          rms: n ? Math.sqrt(stats.sum / n) : 0,
-          activeFrac: n ? stats.active / n : 0,
-          zcr: n ? stats.zc / n : 0,
-          n
-        };
+        // deep analysis of the FINISHED recording — detects real human voice,
+        // rejects empty recordings and background-noise-only takes
+        let meta = await analyzeAudio(blob);
+        if (!meta) {
+          // decoding unavailable — fall back to live mic monitoring stats
+          const n = stats.n || 0;
+          meta = {
+            duration: (Date.now() - startTsRef.current) / 1000,
+            rms: n ? Math.sqrt(stats.sum / n) : 0,
+            activeFrac: n ? stats.active / n : 0,
+            zcr: n ? stats.zc / n : 0,
+            n
+          };
+        }
         const probs = audioProblems(meta);
         if (probs.length) {
           // automatic rejection — bad audio never reaches the database
@@ -964,6 +1107,11 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
 
   const submit = async () => {
     setSubmitError('');
+    // minimum word count for text responses
+    if (hasText && textResponse.trim().split(/\s+/).length < 3) {
+      setSubmitError('Too short — use at least 3 words.');
+      return;
+    }
     // final safety net: re-validate the audio at submit time
     if (audioBlob) {
       const probs = audioProblems(audioMeta);
@@ -976,6 +1124,17 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
       }
     }
     const data = { phone: phone || undefined, language: language.name, text: textResponse, translation, langs: selectedLangs, formality, prompt: promptText, duration: audioMeta ? audioMeta.duration : 0 };
+
+    // OFFLINE MODE: queue locally (logged-in users only), sync when back online
+    if (!navigator.onLine) {
+      if (!phone) { setSubmitError('Log in online once first — offline contributing works only for logged-in contributors.'); return; }
+      await queuePush({ id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, data, blob: audioBlob, at: new Date().toISOString() }).catch(() => {});
+      setEarnedPoints(totalPoints);
+      setSavedOffline(true);
+      setSubmitted(true);
+      return;
+    }
+
     let result = null;
     if (audioBlob) {
       const fd = new FormData();
@@ -988,9 +1147,12 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
     if (!result || !result.ok) {
       if (result && result.error === 'duplicate') setSubmitError('This response is identical (or nearly identical) to one you already submitted — please say something new.');
       else if (result && result.error === 'too_short') setSubmitError(AUDIO_ERROR_MSG.too_short);
+      else if (result && result.error === 'bad_audio') setSubmitError(AUDIO_ERROR_MSG.bad_audio);
+      else if (result && result.error === 'too_short_text') setSubmitError('Too short — use at least 3 words.');
       else setSubmitError('Something went wrong while saving — please try again.');
       return;
     }
+    setSavedOffline(false);
     setEarnedPoints(result.earned || totalPoints);
     setSubmitted(true);
     refreshProfile();
@@ -1000,6 +1162,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
     setCount(c => c + 1); setTextResponse(''); setRecStage('idle'); setTime(0);
     setSelectedLangs([]); setTranslation(''); setFormality('Normal'); setSubmitted(false);
     setAudioBlob(null); setAudioMeta(null); setAudioError(''); setSubmitError(''); setIsPlaying(false); blobUrlRef.current = null;
+    setSavedOffline(false); setBreakChoice(false);
   };
 
   return <section className="task-page wave-bg slim-wave"><div className="container task-layout">
@@ -1073,9 +1236,18 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
         <div className="task-icon success"><Check size={29}/></div>
         <h2>That sounded great.</h2>
         <p className="task-intro">Your contribution has been added to the {language.name} collection. Thank you for making room for more voices.</p>
-        <div className="success-line"><span><Check size={15}/></span> +{earnedPoints} points earned</div>
+        <div className="success-line"><span><Check size={15}/></span> +{earnedPoints} points earned{savedOffline ? ' · saved offline 📴' : ''}</div>
+        {savedOffline && <p className="task-help">You're offline — this contribution is stored on this device and will upload automatically once you're back online.</p>}
         <button className="btn btn-primary task-cta" onClick={nextSentence}>Next sentence <ArrowRight size={18}/></button>
-        <button className="text-action centered" onClick={nextSentence}>Take a short break</button>
+        {!breakChoice ? (
+          <button className="text-action centered" onClick={() => setBreakChoice(true)}>Take a short break</button>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+            <span className="task-help" style={{ margin: 0 }}>Do you want to review or visit the homepage?</span>
+            <button className="btn btn-secondary" onClick={() => navigate('listen')}><Headphones size={15}/> Review clips</button>
+            <button className="btn btn-secondary" onClick={() => navigate('home')}>Visit homepage</button>
+          </div>
+        )}
       </div>}
     </div>
   </div></section>;
@@ -1084,42 +1256,59 @@ function Contribute({ language, setLanguage, phone, refreshProfile }) {
 function Listen({ language, setLanguage, phone, refreshProfile }) {
   const [decision, setDecision] = useState(null);
   const [playing, setPlaying] = useState(false);
-  const [clip, setClip] = useState(null); // real clip from backend (has audio)
+  const [clip, setClip] = useState(null); // real submission from Supabase: voice + response + prompt + translation
   const [clipNum, setClipNum] = useState(1);
-  const [promptText, setPromptText] = useState(language.sample);
+  const [skip, setSkip] = useState(0);       // skips do NOT count toward the session
+  const [excludeId, setExcludeId] = useState('');
+  const [dur, setDur] = useState(0);         // real duration of this recording
   const audioRef = useRef(null);
+  const clipId = clip ? clip.id : null;
 
+  // pull the next pending submission (with voice) from the database
   useEffect(() => {
     setClip(null);
-    api.pendingClip(language.name, phone).then(c => setClip(c));
-    let on = true;
-    (api.getPrompt ? api.getPrompt(language.name, clipNum) : Promise.resolve(null)).then(p => { if (on && p && p.text) setPromptText(p.text); });
-    return () => { on = false; };
-  }, [language.name, clipNum, phone]);
+    api.pendingClip(language.name, phone, skip, excludeId).then(c => setClip(c));
+  }, [language.name, clipNum, phone, skip, excludeId]);
+
+  // real player for the clip's voice recording (loads metadata for the true duration)
+  useEffect(() => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setPlaying(false); setDur(0);
+    if (!clipId || !clip || !clip.audioUrl) return;
+    const a = new Audio(clip.audioUrl);
+    a.addEventListener('loadedmetadata', () => setDur(isFinite(a.duration) ? a.duration : 0));
+    a.addEventListener('ended', () => setPlaying(false));
+    audioRef.current = a;
+    return () => { a.pause(); };
+  }, [clipId]);
 
   const togglePlay = () => {
-    if (clip && clip.audioUrl) {
-      if (!audioRef.current) audioRef.current = new Audio(clip.audioUrl);
-      if (playing) audioRef.current.pause(); else audioRef.current.play();
-    }
-    setPlaying(!playing);
+    if (!audioRef.current) return;
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.play(); setPlaying(true); }
   };
 
   const next = () => {
-    setClipNum(c => c + 1); setDecision(null); setPlaying(false);
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setClipNum(c => c + 1); setDecision(null);
     api.pendingClip(language.name, phone).then(c => setClip(c));
   };
 
   const decide = async (d) => {
     setDecision(d);
-    if (clip) { await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d }); refreshProfile(); }
+    if (clip) {
+      await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d });
+      refreshProfile();
+      // session clip count increases ONLY on a Yes/No verdict
+      setExcludeId(clip.id);
+      setSkip(0);
+      setClipNum(c => c + 1);
+    }
   };
 
   return <section className="task-page listen-page"><div className="container task-layout">
     <aside className="task-aside"><div className="eyebrow ink">Listen</div><h1>Help keep every<br/><em>voice clear.</em></h1><p>Listen to a short recording, compare it to the sentence, and make a simple call.</p><div className="task-aside-card"><span>Reviewing in</span><LanguageSelect language={language} setLanguage={setLanguage}/><div className="mini-progress"><div><span>This session</span><b>{clipNum}/10 clips</b></div><div className="progress-track green-track"><i style={{width: `${clipNum*10}%`}}/></div></div></div></aside>
 
-    <div className="task-main"><div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div><div className="task-card validation-card"><div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>{!decision ? <><h2>Does this recording match?</h2><div className="listen-prompt"><span>The speaker should be saying</span><p>“{clip && clip.prompt ? clip.prompt : promptText}”</p></div>{clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>00:12</span></div> : <p className="task-help">No voice recordings waiting for review in {language.name} yet — contribute a voice or check back soon.</p>}<p className="decision-label">Listen once, then choose what you heard.</p><div className="decision-grid"><button className="decision yes" onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button><button className="decision no" onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button></div><button className="skip-btn" onClick={next}>Skip this clip <SkipForward size={16}/></button></> : <><div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div><h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2><p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p><button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button><button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button></>}</div></div>
+    <div className="task-main"><div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div><div className="task-card validation-card"><div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>{!decision ? <><h2>Does this recording match?</h2><div className="listen-prompt"><span>The prompt they responded to</span><p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>{clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}{clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}</div>{clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">No voice recordings waiting for review in {language.name} yet — contribute a voice or check back soon.</p>}<p className="decision-label">Listen once, then choose what you heard.</p><div className="decision-grid"><button className="decision yes" onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button><button className="decision no" onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button></div><button className="skip-btn" onClick={() => setSkip(s => s + 1)}>Skip this clip <SkipForward size={16}/></button></> : <><div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div><h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2><p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p><button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button><button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button></>}</div></div>
   </div></section>;
 }
 
@@ -1141,7 +1330,7 @@ function LanguageSelect({language,setLanguage}) { const [open,setOpen]=useState(
 function Stat({number,label,accent}) { return <div className={`stat ${accent}`}><strong>{number}</strong><span>{label}</span><i/></div> }
 function Path({icon,number,title,text,cta,action,tone}) { return <article className={`path-card ${tone}`}><div className="path-top"><span className="path-icon">{icon}</span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><button onClick={action}>{cta}<ArrowRight size={17}/></button></article> }
 
-function Footer({navigate}) {
+function Footer({navigate, hasProfile}) {
   const socials = [
     { label: 'Facebook', d: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z' },
     { label: 'Instagram', d: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z' },
@@ -1156,7 +1345,7 @@ function Footer({navigate}) {
         {socials.map(s => <a key={s.label} href="#" aria-label={s.label}><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d={s.d}/></svg></a>)}
       </div>
     </div>
-    <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate('join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
+    <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
   </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>;
 }
 

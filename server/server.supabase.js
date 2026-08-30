@@ -13,12 +13,15 @@ import {
   POINT_RULES, levelInfo, totalSubs, BADGES, earnedBadges,
   activityPayload, bumpDay, topLanguage, STATE_ZONES
 } from './db.js';
-import { getPrompt, allPrompts } from './prompts.js';
+
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, { realtime: { transport: ws } });
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+// friendly root so the Render URL shows a status instead of "Cannot GET /"
+app.get('/', (req, res) => res.json({ ok: true, service: 'nuji-api', try: ['/api/leaderboard', '/api/states', '/api/stats'] }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ---------------- helpers ----------------
@@ -171,12 +174,13 @@ app.get('/api/prompts', async (req, res) => {
   const language = req.query.language || 'Igbo';
   const seed = parseInt(req.query.seed || '0', 10);
   // RATIONING: a prompt is shown to at most 2 contributors, then the next one rotates in
+  // Prompts are English source sentences — same prompt for every language (contributors translate it)
   let { data } = await supabase.from('prompts').select('*')
-    .eq('language', language).eq('is_active', true).lt('uses', 2)
+    .eq('is_active', true).lt('uses', 2)
     .order('uses').order('id').limit(1);
   if (!data || !data.length) {
     ({ data } = await supabase.from('prompts').select('*')
-      .eq('language', language).eq('is_active', true)
+      .eq('is_active', true)
       .order('uses').order('id').limit(1));
   }
   if (data && data[0]) {
@@ -184,7 +188,7 @@ app.get('/api/prompts', async (req, res) => {
     await supabase.from('prompts').update({ uses: (p.uses || 0) + 1 }).eq('id', p.id);
     return res.json({ text: p.text, language, id: p.id, uses: (p.uses || 0) + 1 });
   }
-  res.json({ text: getPrompt(language, seed), language });
+  res.json({ text: '', language });
 });
 
 // ================= CONTRIBUTIONS =================
@@ -195,6 +199,7 @@ app.post('/api/contributions', upload.single('audio'), async (req, res) => {
     const hasText = !!String(text || '').trim();
     const hasVoice = !!req.file;
     if (!hasText && !hasVoice) return res.status(400).json({ error: 'Nothing to submit' });
+    if (hasText && String(text).trim().split(/\s+/).length < 3) return res.status(400).json({ error: 'too_short_text' });
 
     let audioUrl = null;
     if (req.file) {
@@ -257,12 +262,15 @@ app.post('/api/contributions', upload.single('audio'), async (req, res) => {
 // ================= LISTEN / REVIEWS =================
 app.get('/api/clips', async (req, res) => {
   const language = req.query.language;
-    const { data } = await supabase.from('contributions')
+  const skip = parseInt(req.query.skip || '0', 10);
+  const exclude = req.query.exclude || '';
+  const { data } = await supabase.from('contributions')
     .select('*').not('audio_url', 'is', null).eq('language', language).eq('status', 'pending')
-    .order('created_at', { ascending: false }).limit(50);
-  const clip = (data || []).find(c => (c.reviews || []).length < 3 && c.phone !== normalizePhone(req.query.phone));
+    .order('created_at', { ascending: false }).limit(100);
+  const pool = (data || []).filter(c => (c.reviews || []).length < 3 && c.phone !== normalizePhone(req.query.phone) && c.id !== exclude);
+  const clip = pool.length ? pool[Math.min(skip, pool.length - 1)] : null;
   if (!clip) return res.json(null);
-  res.json({ id: clip.id, audioUrl: clip.audio_url, prompt: clip.prompt || clip.text });
+  res.json({ id: clip.id, audioUrl: clip.audio_url, prompt: clip.prompt || '', text: clip.text || '' });
 });
 
 app.post('/api/reviews', async (req, res) => {
@@ -416,11 +424,12 @@ app.get('/api/admin/overview', requireAdmin, async (req, res) => {
         text: (c.text || '').slice(0, 120), fullText: c.text || '', hasAudio: !!c.audio_url, audioUrl: c.audio_url || null,
         points: c.points || 0, duration: c.duration || 0, status: c.status || 'pending',
         hasTranslation: !!c.translation, translation: c.translation || '', annotation: c.annotation || '',
+        annotation_status: c.annotation_status || 'pending',
         speaker: c.speaker || {}, langs: c.langs || [], formality: c.formality || '',
         reviews: (c.reviews || []).length, maxReviews: 3, createdAt: c.created_at
       })),
       topStates: Object.values(statesAgg).sort((a, b) => b.points - a.points).slice(0, 10),
-      allUsers: [...U].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 200).map(u => ({
+      allUsers: [...U].sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 200).map(u => ({
         phone: u.phone, nickname: u.nickname || '', state: u.state || '', lga: u.lga || '', age: u.age || '',
         gender: u.gender || '', languages: u.languages || [], contributionLang: u.contribution_lang || 'Igbo',
         kind: u.profile_kind || 'none', refCode: u.ref_code || '', referredBy: u.referred_by || '',
@@ -447,6 +456,7 @@ app.post('/api/admin/meta', requireAdmin, async (req, res) => {
   if (typeof translation === 'string') patch.translation = translation;
   if (typeof annotation === 'string') patch.annotation = annotation;
   if (typeof annotationStatus === 'string') patch.annotation_status = annotationStatus;
+  if (typeof (req.body || {}).text === 'string') patch.text = req.body.text;
   const { error } = await supabase.from('contributions').update(patch).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -518,14 +528,14 @@ app.get('/api/admin/prompts', requireAdmin, async (req, res) => {
   res.json(data || []);
 });
 app.post('/api/admin/prompts', requireAdmin, async (req, res) => {
-  const { text, language } = req.body || {};
+  const { text, language, category } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'Text required' });
-  const { error } = await supabase.from('prompts').insert({ text: text.trim(), language: language || 'Igbo', is_active: true });
+  const { error } = await supabase.from('prompts').insert({ text: text.trim(), language: language || 'Igbo', category: category || 'Greetings', is_active: true });
   res.json({ ok: !error, error });
 });
 app.post('/api/admin/prompts/bulk', requireAdmin, async (req, res) => {
-  const { lines = [], language = 'Igbo' } = req.body || {};
-  const rows = lines.map(l => String(l || '').trim()).filter(l => l.length > 3).map(t => ({ text: t, language, is_active: true }));
+  const { lines = [], language = 'Igbo', category = 'Greetings' } = req.body || {};
+  const rows = lines.map(l => String(l || '').trim()).filter(l => l.length > 3).map(t => ({ text: t, language, category, is_active: true }));
   if (!rows.length) return res.status(400).json({ error: 'No valid lines' });
   const { error } = await supabase.from('prompts').insert(rows);
   res.json({ ok: !error, count: rows.length, error });
@@ -549,16 +559,8 @@ app.get('/api/admin/annotate-queue', requireAdmin, async (req, res) => {
   res.json(q.slice(0, 50));
 });
 
-// ---------------- start + auto-seed prompts ----------------
+// ---------------- start (prompts come only from the database / admin panel) ----------------
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`✅ Nuji API (Supabase) on port ${PORT}`);
-  try {
-    const { count } = await supabase.from('prompts').select('*', { count: 'exact', head: true });
-    if (!count) {
-      const { error } = await supabase.from('prompts').insert(allPrompts());
-      if (error) console.log('prompt seed skipped:', error.message);
-      else console.log('🌱 Seeded prompt library');
-    }
-  } catch (e) { console.log('seed check failed:', e.message); }
 });

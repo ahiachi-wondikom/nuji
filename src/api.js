@@ -58,7 +58,9 @@ export const api = {
   getPrompt: (language, seed) => get(`/prompts?language=${encodeURIComponent(language)}&seed=${seed || 0}`),
 
   // ---- listening / reviews ----
-  pendingClip: (language, phone) => get(`/clips?language=${encodeURIComponent(language)}&phone=${encodeURIComponent(phone || '')}`),
+    pendingClip: (language, phone, skip, excludeId) => get(
+    `/clips?language=${encodeURIComponent(language)}&phone=${encodeURIComponent(phone || '')}&skip=${skip || 0}&exclude=${encodeURIComponent(excludeId || '')}`
+  ),
   submitReview: (data) => post('/reviews', data),
 
   // ---- public data ----
