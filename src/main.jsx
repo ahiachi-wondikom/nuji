@@ -354,7 +354,7 @@ function App() {
         {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} />}
         {page === 'join' && <Join navigate={navigate} language={language} setLanguage={setLanguage} phone={phone} setPhone={setPhone} onSaved={refreshProfile} />}
         {page === 'contribute' && <Contribute language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} online={online} />}
-        {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
+        {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
         {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
@@ -1253,22 +1253,37 @@ function Contribute({ language, setLanguage, phone, refreshProfile, navigate, on
   </div></section>;
 }
 
-function Listen({ language, setLanguage, phone, refreshProfile }) {
+function Listen({ language, setLanguage, phone, refreshProfile, navigate }) {
   const [decision, setDecision] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [clip, setClip] = useState(null); // real submission from Supabase: voice + response + prompt + translation
+  const [clipLoading, setClipLoading] = useState(true);
   const [clipNum, setClipNum] = useState(1);
   const [skip, setSkip] = useState(0);       // skips do NOT count toward the session
-  const [excludeId, setExcludeId] = useState('');
+  const [excludeIds, setExcludeIds] = useState([]); // clip ids already shown this session (reviewed or skipped) — never shown twice
   const [dur, setDur] = useState(0);         // real duration of this recording
   const audioRef = useRef(null);
   const clipId = clip ? clip.id : null;
 
-  // pull the next pending submission (with voice) from the database
-  useEffect(() => {
+  // Pull the next pending submission (with voice) from the database.
+  // `phone` is always sent so the backend can exclude the current contributor's
+  // own submissions — nobody should be able to review or listen to their own clip.
+  // `excludeList` accumulates every clip id already shown this session (reviewed
+  // or skipped) so the same clip is never served twice in a row.
+  const fetchClip = useCallback((currentSkip, excludeList) => {
+    setClipLoading(true);
     setClip(null);
-    api.pendingClip(language.name, phone, skip, excludeId).then(c => setClip(c));
-  }, [language.name, clipNum, phone, skip, excludeId]);
+    api.pendingClip(language.name, phone, currentSkip, excludeList.join(','))
+      .then(c => { setClip(c || null); setClipLoading(false); })
+      .catch(() => { setClip(null); setClipLoading(false); });
+  }, [language.name, phone]);
+
+  // fresh session whenever the language (or logged-in contributor) changes
+  useEffect(() => {
+    setDecision(null); setSkip(0); setExcludeIds([]); setClipNum(1);
+    fetchClip(0, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language.name, phone]);
 
   // real player for the clip's voice recording (loads metadata for the true duration)
   useEffect(() => {
@@ -1288,27 +1303,77 @@ function Listen({ language, setLanguage, phone, refreshProfile }) {
     else { audioRef.current.play(); setPlaying(true); }
   };
 
+  // move to the next clip after a decision or a skip, making sure we never
+  // re-serve a clip already shown this session
+  const advance = (nextSkip) => {
+    const newExcludes = clip ? [...excludeIds, clip.id] : excludeIds;
+    setExcludeIds(newExcludes);
+    setSkip(nextSkip);
+    fetchClip(nextSkip, newExcludes);
+  };
+
   const next = () => {
-    setClipNum(c => c + 1); setDecision(null);
-    api.pendingClip(language.name, phone).then(c => setClip(c));
+    setDecision(null);
+    advance(0);
   };
 
   const decide = async (d) => {
+    if (!clip) return;
     setDecision(d);
-    if (clip) {
-      await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d });
-      refreshProfile();
-      // session clip count increases ONLY on a Yes/No verdict
-      setExcludeId(clip.id);
-      setSkip(0);
-      setClipNum(c => c + 1);
-    }
+    await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d });
+    refreshProfile();
+    setClipNum(c => c + 1);
+    // the next clip is only fetched once the user taps "Next clip" on the
+    // thank-you screen, via next() -> advance()
   };
+
+  const skipClip = () => {
+    if (!clip) return;
+    advance(skip + 1);
+  };
+
+  const noClipAvailable = !clipLoading && !clip && !decision;
 
   return <section className="task-page listen-page"><div className="container task-layout">
     <aside className="task-aside"><div className="eyebrow ink">Listen</div><h1>Help keep every<br/><em>voice clear.</em></h1><p>Listen to a short recording, compare it to the sentence, and make a simple call.</p><div className="task-aside-card"><span>Reviewing in</span><LanguageSelect language={language} setLanguage={setLanguage}/><div className="mini-progress"><div><span>This session</span><b>{clipNum}/10 clips</b></div><div className="progress-track green-track"><i style={{width: `${clipNum*10}%`}}/></div></div></div></aside>
 
-    <div className="task-main"><div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div><div className="task-card validation-card"><div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>{!decision ? <><h2>Does this recording match?</h2><div className="listen-prompt"><span>The prompt they responded to</span><p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>{clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}{clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}</div>{clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">No voice recordings waiting for review in {language.name} yet — contribute a voice or check back soon.</p>}<p className="decision-label">Listen once, then choose what you heard.</p><div className="decision-grid"><button className="decision yes" onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button><button className="decision no" onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button></div><button className="skip-btn" onClick={() => setSkip(s => s + 1)}>Skip this clip <SkipForward size={16}/></button></> : <><div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div><h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2><p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p><button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button><button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button></>}</div></div>
+    <div className="task-main">
+      {noClipAvailable ? (
+        <div className="task-card validation-card">
+          <div className="task-icon neutral"><Headphones size={29}/></div>
+          <h2>No available prompt to review.</h2>
+          <p className="task-intro">There's nothing waiting for review in {language.name} right now — check back soon, or try another language.</p>
+          <button className="btn btn-primary task-cta" onClick={() => navigate('home')}>Go to Home <ArrowRight size={18}/></button>
+        </div>
+      ) : <>
+        <div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div>
+        <div className="task-card validation-card">
+          <div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>
+          {!decision ? <>
+            <h2>Does this recording match?</h2>
+            <div className="listen-prompt">
+              <span>The prompt they responded to</span>
+              <p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>
+              {clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}
+              {clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}
+            </div>
+            {clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">Loading the next clip…</p>}
+            <p className="decision-label">Listen once, then choose what you heard.</p>
+            <div className="decision-grid">
+              <button className="decision yes" disabled={!clip} onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button>
+              <button className="decision no" disabled={!clip} onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button>
+            </div>
+            <button className="skip-btn" disabled={!clip} onClick={skipClip}>Skip this clip <SkipForward size={16}/></button>
+          </> : <>
+            <div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div>
+            <h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2>
+            <p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p>
+            <button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button>
+            <button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button>
+          </>}
+        </div>
+      </>}
+    </div>
   </div></section>;
 }
 
