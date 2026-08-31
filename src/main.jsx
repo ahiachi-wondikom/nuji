@@ -354,7 +354,7 @@ function App() {
         {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} />}
         {page === 'join' && <Join navigate={navigate} language={language} setLanguage={setLanguage} phone={phone} setPhone={setPhone} onSaved={refreshProfile} />}
         {page === 'contribute' && <Contribute language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} online={online} />}
-        {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} />}
+        {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
         {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
@@ -1253,37 +1253,22 @@ function Contribute({ language, setLanguage, phone, refreshProfile, navigate, on
   </div></section>;
 }
 
-function Listen({ language, setLanguage, phone, refreshProfile, navigate }) {
+function Listen({ language, setLanguage, phone, refreshProfile }) {
   const [decision, setDecision] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [clip, setClip] = useState(null); // real submission from Supabase: voice + response + prompt + translation
-  const [clipLoading, setClipLoading] = useState(true);
   const [clipNum, setClipNum] = useState(1);
   const [skip, setSkip] = useState(0);       // skips do NOT count toward the session
-  const [excludeIds, setExcludeIds] = useState([]); // clip ids already shown this session (reviewed or skipped) — never shown twice
+  const [excludeId, setExcludeId] = useState('');
   const [dur, setDur] = useState(0);         // real duration of this recording
   const audioRef = useRef(null);
   const clipId = clip ? clip.id : null;
 
-  // Pull the next pending submission (with voice) from the database.
-  // `phone` is always sent so the backend can exclude the current contributor's
-  // own submissions — nobody should be able to review or listen to their own clip.
-  // `excludeList` accumulates every clip id already shown this session (reviewed
-  // or skipped) so the same clip is never served twice in a row.
-  const fetchClip = useCallback((currentSkip, excludeList) => {
-    setClipLoading(true);
-    setClip(null);
-    api.pendingClip(language.name, phone, currentSkip, excludeList.join(','))
-      .then(c => { setClip(c || null); setClipLoading(false); })
-      .catch(() => { setClip(null); setClipLoading(false); });
-  }, [language.name, phone]);
-
-  // fresh session whenever the language (or logged-in contributor) changes
+  // pull the next pending submission (with voice) from the database
   useEffect(() => {
-    setDecision(null); setSkip(0); setExcludeIds([]); setClipNum(1);
-    fetchClip(0, []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language.name, phone]);
+    setClip(null);
+    api.pendingClip(language.name, phone, skip, excludeId).then(c => setClip(c));
+  }, [language.name, clipNum, phone, skip, excludeId]);
 
   // real player for the clip's voice recording (loads metadata for the true duration)
   useEffect(() => {
@@ -1303,77 +1288,27 @@ function Listen({ language, setLanguage, phone, refreshProfile, navigate }) {
     else { audioRef.current.play(); setPlaying(true); }
   };
 
-  // move to the next clip after a decision or a skip, making sure we never
-  // re-serve a clip already shown this session
-  const advance = (nextSkip) => {
-    const newExcludes = clip ? [...excludeIds, clip.id] : excludeIds;
-    setExcludeIds(newExcludes);
-    setSkip(nextSkip);
-    fetchClip(nextSkip, newExcludes);
-  };
-
   const next = () => {
-    setDecision(null);
-    advance(0);
+    setClipNum(c => c + 1); setDecision(null);
+    api.pendingClip(language.name, phone).then(c => setClip(c));
   };
 
   const decide = async (d) => {
-    if (!clip) return;
     setDecision(d);
-    await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d });
-    refreshProfile();
-    setClipNum(c => c + 1);
-    // the next clip is only fetched once the user taps "Next clip" on the
-    // thank-you screen, via next() -> advance()
+    if (clip) {
+      await api.submitReview({ phone: phone || undefined, clipId: clip.id, decision: d });
+      refreshProfile();
+      // session clip count increases ONLY on a Yes/No verdict
+      setExcludeId(clip.id);
+      setSkip(0);
+      setClipNum(c => c + 1);
+    }
   };
-
-  const skipClip = () => {
-    if (!clip) return;
-    advance(skip + 1);
-  };
-
-  const noClipAvailable = !clipLoading && !clip && !decision;
 
   return <section className="task-page listen-page"><div className="container task-layout">
     <aside className="task-aside"><div className="eyebrow ink">Listen</div><h1>Help keep every<br/><em>voice clear.</em></h1><p>Listen to a short recording, compare it to the sentence, and make a simple call.</p><div className="task-aside-card"><span>Reviewing in</span><LanguageSelect language={language} setLanguage={setLanguage}/><div className="mini-progress"><div><span>This session</span><b>{clipNum}/10 clips</b></div><div className="progress-track green-track"><i style={{width: `${clipNum*10}%`}}/></div></div></div></aside>
 
-    <div className="task-main">
-      {noClipAvailable ? (
-        <div className="task-card validation-card">
-          <div className="task-icon neutral"><Headphones size={29}/></div>
-          <h2>No available prompt to review.</h2>
-          <p className="task-intro">There's nothing waiting for review in {language.name} right now — check back soon, or try another language.</p>
-          <button className="btn btn-primary task-cta" onClick={() => navigate('home')}>Go to Home <ArrowRight size={18}/></button>
-        </div>
-      ) : <>
-        <div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div>
-        <div className="task-card validation-card">
-          <div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>
-          {!decision ? <>
-            <h2>Does this recording match?</h2>
-            <div className="listen-prompt">
-              <span>The prompt they responded to</span>
-              <p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>
-              {clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}
-              {clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}
-            </div>
-            {clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">Loading the next clip…</p>}
-            <p className="decision-label">Listen once, then choose what you heard.</p>
-            <div className="decision-grid">
-              <button className="decision yes" disabled={!clip} onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button>
-              <button className="decision no" disabled={!clip} onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button>
-            </div>
-            <button className="skip-btn" disabled={!clip} onClick={skipClip}>Skip this clip <SkipForward size={16}/></button>
-          </> : <>
-            <div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div>
-            <h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2>
-            <p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p>
-            <button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button>
-            <button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button>
-          </>}
-        </div>
-      </>}
-    </div>
+    <div className="task-main"><div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div><div className="task-card validation-card"><div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>{!decision ? <><h2>Does this recording match?</h2><div className="listen-prompt"><span>The prompt they responded to</span><p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>{clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}{clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}</div>{clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">No voice recordings waiting for review in {language.name} yet — contribute a voice or check back soon.</p>}<p className="decision-label">Listen once, then choose what you heard.</p><div className="decision-grid"><button className="decision yes" onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button><button className="decision no" onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button></div><button className="skip-btn" onClick={() => setSkip(s => s + 1)}>Skip this clip <SkipForward size={16}/></button></> : <><div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div><h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2><p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p><button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button><button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button></>}</div></div>
   </div></section>;
 }
 
@@ -1396,22 +1331,68 @@ function Stat({number,label,accent}) { return <div className={`stat ${accent}`}>
 function Path({icon,number,title,text,cta,action,tone}) { return <article className={`path-card ${tone}`}><div className="path-top"><span className="path-icon">{icon}</span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><button onClick={action}>{cta}<ArrowRight size={17}/></button></article> }
 
 function Footer({navigate, hasProfile}) {
- const socials = [
-    { label: 'Facebook', d: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z', url: 'https://www.facebook.com/share/1L555YX6ZP/' },
-    { label: 'Instagram', d: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z', url: 'https://www.instagram.com/nuji_project?igsi=MTA0NzZ2ejFyazJ2OA==' },
-    { label: 'Telegram', d: 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z', url: 'https://t.me/nujiproject' },
-    { label: 'WhatsApp', d: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z', url: 'https://whatsapp.com/channel/0029Vb7ssy1G3R3dQSGay21w' },
-    { label: 'Twitter/X', d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z', url: '' }, // link TBD
-    { label: 'TikTok', d: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84.02 8.76-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.3-.67.31-1.06.04-2.26.02-4.51.02-6.77.02-2.93-.01-5.85.02-8.78z', url: 'https://www.tiktok.com/@ahiachiwondikom?_r=1&_t=ZS-99L0somzffd' },
-];
-  return <footer className="footer"><div className="container footer-grid">
-    <div><button className="brand footer-brand" onClick={() => navigate('home')}><img className="brand-logo" src="/assets/nuji-logo.png" alt=""/><span>nuji</span></button><p>Language data made by the people who speak it.</p>
-      <div className="footer-social">
-        {socials.map(s => <a key={s.label} href="#" aria-label={s.label}><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d={s.d}/></svg></a>)}
-      </div>
-    </div>
-    <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
-  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>;
+
+  const socials = [
+    {
+      label: 'Facebook',
+      d: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z',
+      url: 'https://www.facebook.com/share/1L555YX6ZP/'
+    },
+    {
+      label: 'Instagram',
+      d: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z',
+      url: 'https://www.instagram.com/nuji_project?igsi=MTA0NzZ2ejFyazJ2OA=='
+    },
+    {
+      label: 'Telegram',
+      d: 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z',
+      url: 'https://t.me/nujiproject'
+    },
+    {
+      label: 'WhatsApp',
+      d: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z',
+      url: 'https://whatsapp.com/channel/0029Vb7ssy1G3R3dQSGay21w'
+    },
+    {
+      label: 'Twitter/X',
+      d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z',
+      url: '' // link TBD — add when ready
+    },
+    {
+      label: 'TikTok',
+      d: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84.02 8.76-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.3-.67.31-1.06.04-2.26.02-4.51.02-6.77.02-2.93-.01-5.85.02-8.78z',
+      url: 'https://www.tiktok.com/@ahiachiwondikom?_r=1&_t=ZS-99L0somzffd'
+    },
+  ];
+
+  return (
+    <footer className="footer">
+      <div className="container footer-grid">
+        <div>
+          <button className="brand footer-brand" onClick={() => navigate('home')}>
+            <img className="brand-logo" src="/assets/nuji-logo.png" alt=""/>
+            <span>nuji</span>
+          </button>
+          <p>Language data made by the people who speak it.</p>
+          <div className="footer-social">
+            {socials.map(s => (
+              <a
+                key={s.label}
+                href={s.url || '#'}
+                target={s.url ? '_blank' : undefined}
+                rel={s.url ? 'noopener noreferrer' : undefined}
+                aria-label={s.label}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d={s.d}/>
+                </svg>
+              </a>
+            ))}
+          </div>
+        </div>
+        <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
+  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>
+  );
 }
 
 createRoot(document.getElementById('root')).render(<App />);
