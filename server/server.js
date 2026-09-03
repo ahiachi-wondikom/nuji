@@ -242,24 +242,27 @@ app.post('/api/contributions', upload.single('audio'), (req, res) => {
 
 // ================= LISTEN / REVIEWS =================
 
-// A clip awaiting review: has audio, fewer than 3 reviews
+// A clip awaiting review: has audio, matches the requested language, fewer than 3 reviews,
+// was not submitted by the current reviewer, hasn't already been reviewed by them, and isn't
+// in the `exclude` list (every clip already shown to them this session, comma-separated ids).
 app.get('/api/clips', (req, res) => {
   const language = req.query.language;
   const skip = parseInt(req.query.skip || '0', 10);
-  const exclude = req.query.exclude || '';
+  const exclude = String(req.query.exclude || '').split(',').map(s => s.trim()).filter(Boolean);
   const reviewerPhone = req.query.phone ? normalizePhone(req.query.phone) : '';
   const pool = [...getDB().contributions].reverse()
     .filter(c =>
       c.audioUrl &&
+      c.language === language &&
       (c.status || 'pending') === 'pending' &&
       (c.reviews || []).length < 3 &&
       c.phone !== reviewerPhone &&
-      c.id !== exclude &&
+      !exclude.includes(c.id) &&
       !(c.reviews || []).some(r => r.phone && r.phone === reviewerPhone)
     );
   const clip = pool.length ? pool[Math.min(skip, pool.length - 1)] : null;
   if (!clip) return res.json(null);
-  res.json({ id: clip.id, audioUrl: clip.audioUrl, prompt: clip.prompt || '', text: clip.text || '' });
+  res.json({ id: clip.id, audioUrl: clip.audioUrl, prompt: clip.prompt || '', text: clip.text || '', translation: clip.translation || '' });
 });
 
 app.post('/api/reviews', (req, res) => {
