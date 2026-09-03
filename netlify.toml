@@ -1,6 +1,6 @@
 # Netlify config for the Nuji SPA + separate admin page
 [build]
-  command = "npm install --ignore-scripts=false && npx --yes vite build"
+  command = "npm run build"
   publish = "dist"
 
 # The admin portal is its own page
