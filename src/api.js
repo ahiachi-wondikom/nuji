@@ -5,7 +5,7 @@
 // ============================================================
 
 // Development: Vite proxy → localhost:4000. Production: your Render backend.
-const BASE = (import.meta.env.VITE_API_URL || 'https://nuji2.onrender.com') + '/api';
+const BASE = (import.meta.env.VITE_API_URL || 'https://nuji.onrender.com') + '/api';
 
 const adminToken = () => { try { return localStorage.getItem('nuji_admin_token') || ''; } catch { return ''; } };
 
