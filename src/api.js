@@ -69,7 +69,7 @@ export const api = {
   stats: () => get('/stats'),
 
   // ---- admin (token-protected) ----
-  adminLogin: (email, password) => post('/admin/login', { email, password }),
+  adminLogin: (email, password) => post('/api/admin/login', { email, password }),
   adminOverview: () => get('/admin/overview'),
   adminAnalytics: () => get('/admin/analytics'),
   adminSetStatus: (id, status) => post('/admin/status', { id, status }),
