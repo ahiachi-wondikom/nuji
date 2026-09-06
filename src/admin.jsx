@@ -643,6 +643,7 @@ function Admin() {
   const [bulkText, setBulkText] = useState('');
   const [bulkLang, setBulkLang] = useState('English');
   const [bulkCat, setBulkCat] = useState('Greetings');
+  const [promptCatFilter, setPromptCatFilter] = useState('All');
   const [promptMsg, setPromptMsg] = useState('');
   // digest
   const [digestMsg, setDigestMsg] = useState('');
@@ -964,12 +965,19 @@ function Admin() {
             </div>
 
             <div className="admin-panel">
-              <div className="admin-panel-head"><h3>All prompts</h3><span className="admin-count">{(prompts || []).length} loaded</span></div>
+              <div className="admin-panel-head">
+  <h3>All prompts</h3>
+  <select value={promptCatFilter} onChange={e => setPromptCatFilter(e.target.value)} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '4px 8px', font: 'inherit', fontSize: 12 }}>
+    <option value="All">All categories</option>
+    {PROMPT_CATS.map(c => <option key={c}>{c}</option>)}
+  </select>
+  <span className="admin-count">{(prompts || []).length} loaded</span>
+</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 480, overflowY: 'auto' }}>
-                {(prompts || []).map(p => (
+                {(prompts || []).filter(p => promptCatFilter === 'All' || p.category === promptCatFilter).map(p => (
                   <div key={p.id} className="admin-mini-row" style={{ opacity: p.is_active ? 1 : .5 }}>
                     <span className="admin-chip">{p.language}</span>
-                    <span className="admin-chip" style={{ background: '#f5f3ff', color: '#7c3aed' }}>{p.category || 'Greetings'}</span>
+                    <span className="admin-chip" style={{ background: '#f5f3ff', color: '#7c3aed' }}>{p.category || 'General'}</span>
                     <small className="admin-ellipsis" style={{ flex: 1 }}>{p.text}</small>
                     <button className="admin-mini-btn" title={p.is_active ? 'Deactivate' : 'Activate'} onClick={async () => { await api.adminTogglePrompt(p.id); api.adminPrompts().then(setPrompts); }}>{p.is_active ? <Check size={13} /> : <X size={13} />}</button>
                     <button className="admin-mini-btn" title="Delete" onClick={async () => { await api.adminDeletePrompt(p.id); api.adminPrompts().then(setPrompts); }}><Trash2 size={13} /></button>
