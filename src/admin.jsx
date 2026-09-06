@@ -977,7 +977,7 @@ function Admin() {
                 {(prompts || []).filter(p => promptCatFilter === 'All' || p.category === promptCatFilter).map(p => (
                   <div key={p.id} className="admin-mini-row" style={{ opacity: p.is_active ? 1 : .5 }}>
                     <span className="admin-chip">{p.language}</span>
-                    <span className="admin-chip" style={{ background: '#f5f3ff', color: '#7c3aed' }}>{p.category || 'General'}</span>
+                    <span className="admin-chip" style={{ background: '#f5f3ff', color: '#7c3aed' }}>{p.category || '—'}</span>
                     <small className="admin-ellipsis" style={{ flex: 1 }}>{p.text}</small>
                     <button className="admin-mini-btn" title={p.is_active ? 'Deactivate' : 'Activate'} onClick={async () => { await api.adminTogglePrompt(p.id); api.adminPrompts().then(setPrompts); }}>{p.is_active ? <Check size={13} /> : <X size={13} />}</button>
                     <button className="admin-mini-btn" title="Delete" onClick={async () => { await api.adminDeletePrompt(p.id); api.adminPrompts().then(setPrompts); }}><Trash2 size={13} /></button>
