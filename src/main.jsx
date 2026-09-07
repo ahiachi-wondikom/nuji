@@ -15,6 +15,27 @@ const languages = [
   { name: 'Pidgin', native: 'Naija Pidgin', sample: 'How you dey today?', color: 'green' },
 ];
 
+const FALLBACK_RANKS = [
+  ['Amina Yusuf', 'Hausa', '1,240'],
+  ['Chiamaka Okoro', 'Igbo', '1,126'],
+  ['Tunde Adeyemi', 'Yoruba', '978'],
+  ['Blessing James', 'Pidgin', '842'],
+  ['Sani Garba', 'Hausa', '770'],
+];
+
+const FALLBACK_STATES = [
+  { name: 'Anambra', zone: 'South East', points: 6864, contributors: 1, submissions: 44 },
+  { name: 'Borno', zone: 'North East', points: 22, contributors: 1, submissions: 2 },
+  { name: 'Lagos', zone: 'South West', points: 154, contributors: 3, submissions: 12 },
+  { name: 'Enugu', zone: 'South East', points: 89, contributors: 2, submissions: 7 },
+  { name: 'Kano', zone: 'North West', points: 45, contributors: 1, submissions: 4 },
+  { name: 'Oyo', zone: 'South West', points: 67, contributors: 2, submissions: 5 },
+  { name: 'Rivers', zone: 'South South', points: 34, contributors: 1, submissions: 3 },
+  { name: 'Kaduna', zone: 'North West', points: 28, contributors: 1, submissions: 2 },
+  { name: 'Plateau', zone: 'North Central', points: 19, contributors: 1, submissions: 1 },
+  { name: 'Edo', zone: 'South South', points: 41, contributors: 2, submissions: 4 },
+];
+
 const zones = ['All States', 'South East', 'South West', 'South South', 'North Central', 'North East', 'North West'];
 
 const pointRules = { text: 3, voice: 5, both: 8, mix: 3 };
@@ -160,6 +181,57 @@ const getCookie = () => { const m = document.cookie.match(/(?:^|; )nuji_phone=([
 const setCookie = (v) => { document.cookie = `nuji_phone=${encodeURIComponent(v)}; path=/; max-age=31536000; SameSite=Lax`; };
 const clearCookie = () => { document.cookie = 'nuji_phone=; path=/; max-age=0'; };
 
+const FALLBACK_BADGES = [
+  { category: 'Getting Started', icon: '🎙️', name: 'First Voice', desc: 'Made your first contribution', earned: true },
+  { category: 'Volume', icon: '🔥', name: 'On Fire', desc: '10 contributions submitted', earned: true },
+  { category: 'Volume', icon: '💪', name: 'Dedicated', desc: '50 contributions submitted', earned: false },
+  { category: 'Volume', icon: '🏆', name: 'Champion', desc: '100 contributions submitted', earned: false },
+  { category: 'Voice', icon: '🎤', name: 'Voice Hero', desc: '20 voice recordings submitted', earned: false },
+  { category: 'Language', icon: '🦅', name: 'Igbo Pride', desc: '20 Igbo contributions', earned: false },
+  { category: 'Language', icon: '⭐', name: 'Yoruba Star', desc: '20 Yoruba contributions', earned: false },
+  { category: 'Language', icon: '🌙', name: 'Arewa Champion', desc: '20 Hausa contributions', earned: false },
+  { category: 'Language', icon: '👑', name: 'Pidgin King', desc: '20 Pidgin contributions', earned: true },
+  { category: 'Code Switch', icon: '🔀', name: 'Language Mixer', desc: 'First code-switched submission', earned: true },
+  { category: 'Code Switch', icon: '🌍', name: 'Multilingual Master', desc: 'Code-switched in 3+ languages', earned: true },
+  { category: 'Streaks', icon: '📅', name: '7 Day Streak', desc: 'Contributed 7 days in a row', earned: false },
+  { category: 'Streaks', icon: '️', name: 'Two Week Warrior', desc: '14 day streak', earned: false },
+  { category: 'Streaks', icon: '🌟', name: 'Monthly Legend', desc: 'Contributed 30 days in a row', earned: false },
+  { category: 'Community', icon: '👥', name: 'Reviewer', desc: 'Reviewed 10 submissions', earned: true },
+  { category: 'Community', icon: '🧓', name: 'Elder', desc: 'Reviewed 50 submissions', earned: false },
+  { category: 'Community', icon: '🤝', name: 'Village Champion', desc: 'Referred 5 contributors', earned: false },
+  { category: 'Points', icon: '⭐', name: 'Top Scorer', desc: 'Earned 100 points', earned: true },
+  { category: 'Special', icon: '🐦', name: 'Early Bird', desc: 'One of the first 100 contributors', earned: true },
+];
+
+const recentWeeks = [0,1,0,0,0, 0,2,0,1,0, 0,1,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,1,0];
+
+// Demo profile shown only when the backend is unreachable
+const DEMO_PROFILE = {
+  phone: '', nickname: '', state: 'Anambra', lga: '',
+  points: 153, rank: 1, submissions: 43, reviews: 9,
+  level: 'Expert Contributor', levelProgress: 73, levelTarget: 100, streak: 1,
+  profileKind: 'full', hasProfile: true,
+  overview: [
+    { icon: 'total', number: 43, label: 'Total' },
+    { icon: 'text', number: 25, label: 'Text Only' },
+    { icon: 'voice', number: 4, label: 'Voice Only' },
+    { icon: 'both', number: 14, label: 'Text + Voice' },
+    { icon: 'mix', number: 3, label: 'Code-switched' },
+    { icon: 'reviews', number: 9, label: 'Reviews Done' }
+  ],
+  breakdown: [
+    { label: 'Text only', count: 1, rate: 3 },
+    { label: 'Voice only', count: 0, rate: 2 },
+    { label: 'Text + Voice', count: 0, rate: 5 }
+  ],
+  activityCells: [...Array(371 - recentWeeks.length).fill(0), ...recentWeeks],
+  activityMonths: ['S', 'O', 'N', 'D', 'J', 'F', 'M', 'A', 'M', 'J', 'J', 'A'],
+  badges: FALLBACK_BADGES,
+  badgesEarned: FALLBACK_BADGES.filter(b => b.earned).length,
+  badgesTotal: FALLBACK_BADGES.length,
+  referral: { url: 'https://nuji-test.netlify.app/?ref=', joined: 0, points: 0 }
+};
+
 // Nigeria's 36 states + FCT with LGAs
 const nigeriaStates = {
   'Abia': ['Aba North','Aba South','Arochukwu','Bende','Ikwuano','Isiala Ngwa North','Isiala Ngwa South','Isuikwuato','Obi Ngwa','Ohafia','Osisioma','Ugwunagbo','Ukwa East','Ukwa West','Umuahia North','Umuahia South','Umu Nneochi'],
@@ -213,7 +285,6 @@ function App() {
   // ---- session: localStorage + cookie, phone number is the login key ----
   const [phone, setPhoneState] = useState(() => { try { return localStorage.getItem('nuji_phone') || getCookie(); } catch { return getCookie(); } });
   const [profile, setProfile] = useState(null); // live data from the API
-  const [profileLoading, setProfileLoading] = useState(false);
 
   const setPhone = (p) => {
     try { p ? localStorage.setItem('nuji_phone', p) : localStorage.removeItem('nuji_phone'); } catch {}
@@ -222,15 +293,15 @@ function App() {
   };
 
   const refreshProfile = useCallback(() => {
-    if (!phone) { setProfile(null); setProfileLoading(false); return; }
-    setProfileLoading(true);
-    api.getProfile(phone).then(p => { setProfile(p); setProfileLoading(false); });
+    if (!phone) { setProfile(null); return; }
+    api.getProfile(phone).then(p => setProfile(p));
   }, [phone]);
 
   useEffect(() => { refreshProfile(); }, [refreshProfile]);
 
   // icons only appear once a FULL profile exists in the database
   const hasProfile = !!(profile && profile.hasProfile);
+  const profileData = profile || DEMO_PROFILE;
 
   const navigate = (next) => { const path = pathMap[next] || '/'; window.history.pushState({}, '', path); setPage(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
@@ -277,7 +348,7 @@ function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">Skip to main content</a>
-      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} points={profile ? profile.points : 0} />
+      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} points={profileData.points} />
       <main id="main">
         {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} hasProfile={hasProfile} />}
         {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} />}
@@ -286,11 +357,7 @@ function App() {
         {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
-        {page === 'profile' && (
-          profileLoading ? <div className="container" style={{ padding: '80px 0', textAlign: 'center' }}><p>Loading your profile…</p></div>
-          : profile ? <Profile navigate={navigate} profile={profile} onLogout={logout} />
-          : <div className="container" style={{ padding: '80px 0', textAlign: 'center' }}><p>We couldn't find a profile for this account.</p><button className="btn btn-primary" onClick={() => navigate('join')}>Set up a profile</button></div>
-        )}
+        {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
         {page === 'admin' && <Admin />}
       </main>
       {page !== 'admin' && <Footer navigate={navigate} hasProfile={hasProfile} />}
@@ -492,10 +559,9 @@ function StatePage({ navigate }) {
   const [selectedZone, setSelectedZone] = useState('All States');
   const [selectedView, setSelectedView] = useState('states');
   const [data, setData] = useState(null);
-  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => { api.states().then(d => { setData(Array.isArray(d) ? d : []); setLoaded(true); }); }, []);
-  const stateData = data || [];
+  useEffect(() => { api.states().then(d => { if (d && d.length) setData(d); }); }, []);
+  const stateData = data || FALLBACK_STATES;
 
   const filteredStates = selectedZone === 'All States' ? stateData : stateData.filter(s => s.zone === selectedZone);
   const sortedStates = [...filteredStates].sort((a, b) => b.points - a.points);
@@ -510,8 +576,6 @@ function StatePage({ navigate }) {
           <p className="state-subtitle">Which state is building Nigerian language AI the hardest? 🇳🇬</p>
         </div>
       </div>
-      {!loaded && <p className="task-help">Loading state rankings…</p>}
-      {loaded && sortedStates.length === 0 && <p className="task-help">No state data yet — be the first to contribute!</p>}
       {topState && (
         <div className="leading-state-card">
           <div className="leading-state-content">
@@ -557,17 +621,8 @@ function Profile({ navigate, profile, onLogout }) {
   const overviewIconMap = { total: <BarChart3 size={20}/>, text: <Layers size={20}/>, voice: <Mic size={20}/>, both: <Award size={20}/>, mix: <MessageCircle size={20}/>, reviews: <Users size={20}/> };
   const overviewToneMap = { total: 'tone-green', text: 'tone-blue', voice: 'tone-purple', both: 'tone-gold', mix: 'tone-pink', reviews: 'tone-teal' };
 
-  const badges = profile.badges || [];
-  const overview = profile.overview || [];
-  const breakdown = profile.breakdown || [];
-  const activityCells = profile.activityCells || [];
-  const activityMonths = profile.activityMonths || [];
-  const referral = profile.referral || { url: '', joined: 0, points: 0 };
-  const badgesEarned = profile.badgesEarned || 0;
-  const badgesTotal = profile.badgesTotal || 0;
-
   const badgeCategories = [];
-  for (const b of badges) {
+  for (const b of profile.badges) {
     let cat = badgeCategories.find(c => c.category === b.category);
     if (!cat) { cat = { category: b.category, badges: [] }; badgeCategories.push(cat); }
     cat.badges.push(b);
@@ -604,39 +659,39 @@ function Profile({ navigate, profile, onLogout }) {
       <div className="profile-tabs">
         <button className={tab==='overview'?'profile-tab active':'profile-tab'} onClick={() => setTab('overview')}>Overview</button>
         <button className={tab==='activity'?'profile-tab active':'profile-tab'} onClick={() => setTab('activity')}>Activity</button>
-        <button className={tab==='badges'?'profile-tab active':'profile-tab'} onClick={() => setTab('badges')}>Badges ({badgesEarned})</button>
+        <button className={tab==='badges'?'profile-tab active':'profile-tab'} onClick={() => setTab('badges')}>Badges ({profile.badgesEarned})</button>
       </div>
 
       {tab === 'overview' && <div className="profile-panel">
         <div className="overview-grid">
-          {overview.map(s => <div className={`overview-card ${overviewToneMap[s.icon]}`} key={s.label}><span className="overview-icon">{overviewIconMap[s.icon]}</span><strong>{s.number}</strong><span>{s.label}</span></div>)}
+          {profile.overview.map(s => <div className={`overview-card ${overviewToneMap[s.icon]}`} key={s.label}><span className="overview-icon">{overviewIconMap[s.icon]}</span><strong>{s.number}</strong><span>{s.label}</span></div>)}
         </div>
 
         <div className="points-breakdown-card">
           <h3>Points Breakdown</h3>
           <div className="breakdown-rows">
-            {breakdown.map(row => <div className="breakdown-row" key={row.label}>
+            {profile.breakdown.map(row => <div className="breakdown-row" key={row.label}>
               <span className="breakdown-label">{row.label}</span>
               <span className="breakdown-calc">{row.count} × {row.rate}pts</span>
               <span className="breakdown-pts">{row.count * row.rate} pts</span>
             </div>)}
           </div>
-          <div className="breakdown-total-row"><span>Total</span><strong>{breakdown.reduce((s,r) => s + r.count * r.rate, 0)} pts</strong></div>
+          <div className="breakdown-total-row"><span>Total</span><strong>{profile.breakdown.reduce((s,r) => s + r.count * r.rate, 0)} pts</strong></div>
         </div>
 
         <div className="invite-card">
           <h3>🤝 Invite Friends</h3>
           <p>Earn <strong>+10 points</strong> for every person who joins!</p>
           <div className="invite-link-row">
-            <span className="invite-link">{referral.url}</span>
-            <button className="invite-copy-btn" onClick={() => navigator.clipboard?.writeText(referral.url)}>Copy</button>
+            <span className="invite-link">{profile.referral.url}</span>
+            <button className="invite-copy-btn" onClick={() => navigator.clipboard?.writeText(profile.referral.url)}>Copy</button>
           </div>
           <div className="invite-stats-row">
-            <span className="invite-stat-pill"><Users size={14}/> {referral.joined} joined</span>
-            <span className="invite-stat-pill gold"><Award size={14}/> +{referral.points} pts</span>
+            <span className="invite-stat-pill"><Users size={14}/> {profile.referral.joined} joined</span>
+            <span className="invite-stat-pill gold"><Award size={14}/> +{profile.referral.points} pts</span>
           </div>
           <button className="btn invite-whatsapp" onClick={() => {
-            const shareText = `🇳🇬 Join me on Nuji! Let's build AI that understands our Nigerian languages. Use my link to start contributing: ${referral.url}`;
+            const shareText = `🇳🇬 Join me on Nuji! Let's build AI that understands our Nigerian languages. Use my link to start contributing: ${profile.referral.url}`;
             window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, '_blank', 'noopener,noreferrer');
           }}><MessageCircle size={17}/> Share on WhatsApp</button>
           <button className="btn btn-primary invite-continue" onClick={() => navigate('contribute')}>Continue Contributing <ArrowRight size={17}/></button>
@@ -647,10 +702,10 @@ function Profile({ navigate, profile, onLogout }) {
         <div className="activity-card">
           <h3>Contribution Activity</h3>
           <p className="activity-sub">{profile.submissions} contributions in the last year</p>
-          <div className="activity-months">{activityMonths.map((m, i) => <span key={i}>{m}</span>)}</div>
+          <div className="activity-months">{profile.activityMonths.map((m, i) => <span key={i}>{m}</span>)}</div>
           <div className="activity-scroll">
             <div className="activity-cells">
-              {activityCells.map((level, i) => <span key={i} className={`activity-cell level-${level}`}/>)}
+              {profile.activityCells.map((level, i) => <span key={i} className={`activity-cell level-${level}`}/>)}
             </div>
           </div>
           <div className="activity-legend">
@@ -664,12 +719,11 @@ function Profile({ navigate, profile, onLogout }) {
 
       {tab === 'badges' && <div className="profile-panel">
         <div className="badges-head">
-          <div><h3>All Badges</h3><p className="activity-sub">{badgesEarned} of {badgesTotal} earned</p></div>
-          <span className="badges-percent">{badgesTotal ? Math.round((badgesEarned/badgesTotal)*100) : 0}%</span>
+          <div><h3>All Badges</h3><p className="activity-sub">{profile.badgesEarned} of {profile.badgesTotal} earned</p></div>
+          <span className="badges-percent">{Math.round((profile.badgesEarned/profile.badgesTotal)*100)}%</span>
         </div>
-        <div className="progress-track green-track"><i style={{width: `${badgesTotal ? (badgesEarned/badgesTotal)*100 : 0}%`}}/></div>
+        <div className="progress-track green-track"><i style={{width: `${(profile.badgesEarned/profile.badgesTotal)*100}%`}}/></div>
         <div className="badge-categories">
-          {badgeCategories.length === 0 && <p className="task-help">No badges yet — start contributing to earn your first one!</p>}
           {badgeCategories.map(cat => <div className="badge-category" key={cat.category}>
             <h4>{cat.category}</h4>
             <div className="badge-grid">
@@ -1262,14 +1316,13 @@ function Leaderboard() {
   const [filter, setFilter] = useState('This month');
   const [rows, setRows] = useState(null);
   const [stats, setStats] = useState(null);
-  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    api.leaderboard().then(r => { setRows(Array.isArray(r) ? r : []); setLoaded(true); });
+    api.leaderboard().then(r => { if (r && r.length) setRows(r); });
     api.stats().then(s => { if (s) setStats(s); });
   }, []);
-  const ranks = rows || [];
+  const ranks = rows || FALLBACK_RANKS;
 
-  return <section className="leader-page wave-bg slim-wave"><div className="container"><div className="leader-hero"><div><div className="eyebrow ink">Community progress</div><h1>Every contribution<br/>moves us <em>forward.</em></h1></div><p>A small thank-you to the people helping Nigerian languages take up the space they deserve.</p></div><div className="leader-stats"><Stat number={stats ? stats.sentences.toLocaleString() : '0'} label="Sentences contributed" accent="green"/><Stat number={stats ? stats.reviews.toLocaleString() : '0'} label="Clips reviewed" accent="green"/><Stat number="4" label="Languages growing" accent="green"/></div><div className="leader-controls"><div className="filters">{['This week','This month','All time'].map(x => <button key={x} className={filter === x ? 'filter active' : 'filter'} onClick={() => setFilter(x)}>{x}</button>)}</div><button className="language-nav leader-lang"><span className="dot"/> All languages <ChevronDown size={16}/></button></div><div className="leaderboard-card"><div className="rank-head"><span>Rank</span><span>Contributor</span><span>Language</span><span>Contributions</span></div>{!loaded && <p className="task-help" style={{padding: '20px'}}>Loading leaderboard…</p>}{loaded && ranks.length === 0 && <p className="task-help" style={{padding: '20px'}}>No contributors yet — be the first to appear here!</p>}{ranks.map((r,i) => <div className={`rank-row ${i<3 ? 'top-rank' : ''}`} key={r[0]}><span className={`rank-num rank-${i+1}`}>{i<3 ? <Trophy size={18}/> : String(i+1).padStart(2,'0')}</span><span className="person"><i>{r[0].split(' ').map(x => x[0]).join('')}</i><b>{r[0]}</b></span><span className="rank-lang"><span className="dot"/>{r[1]}</span><span className="rank-count">{r[2]}</span></div>)}</div><div className="rank-note"><span><Check size={16}/> Rankings celebrate contribution, not competition.</span><span>Updated today</span></div></div></section>;
+  return <section className="leader-page wave-bg slim-wave"><div className="container"><div className="leader-hero"><div><div className="eyebrow ink">Community progress</div><h1>Every contribution<br/>moves us <em>forward.</em></h1></div><p>A small thank-you to the people helping Nigerian languages take up the space they deserve.</p></div><div className="leader-stats"><Stat number={stats ? stats.sentences.toLocaleString() : '0'} label="Sentences contributed" accent="green"/><Stat number={stats ? stats.reviews.toLocaleString() : '0'} label="Clips reviewed" accent="green"/><Stat number="4" label="Languages growing" accent="green"/></div><div className="leader-controls"><div className="filters">{['This week','This month','All time'].map(x => <button key={x} className={filter === x ? 'filter active' : 'filter'} onClick={() => setFilter(x)}>{x}</button>)}</div><button className="language-nav leader-lang"><span className="dot"/> All languages <ChevronDown size={16}/></button></div><div className="leaderboard-card"><div className="rank-head"><span>Rank</span><span>Contributor</span><span>Language</span><span>Contributions</span></div>{ranks.map((r,i) => <div className={`rank-row ${i<3 ? 'top-rank' : ''}`} key={r[0]}><span className={`rank-num rank-${i+1}`}>{i<3 ? <Trophy size={18}/> : String(i+1).padStart(2,'0')}</span><span className="person"><i>{r[0].split(' ').map(x => x[0]).join('')}</i><b>{r[0]}</b></span><span className="rank-lang"><span className="dot"/>{r[1]}</span><span className="rank-count">{r[2]}</span></div>)}</div><div className="rank-note"><span><Check size={16}/> Rankings celebrate contribution, not competition.</span><span>Updated today</span></div></div></section>;
 }
 
 function LanguageSelect({language,setLanguage}) { const [open,setOpen]=useState(false); return <div className="selector-wrap"><button className="select-button" onClick={() => setOpen(!open)}>{language.name}<ChevronDown size={16}/></button>{open&&<div className="select-menu">{languages.map(l => <button key={l.name} onClick={() => {setLanguage(l);setOpen(false)}}><span className={`dot ${l.color}`}/>{l.name}{l.name===language.name&&<Check size={15}/>}</button>)}</div>}</div> }
@@ -1278,68 +1331,22 @@ function Stat({number,label,accent}) { return <div className={`stat ${accent}`}>
 function Path({icon,number,title,text,cta,action,tone}) { return <article className={`path-card ${tone}`}><div className="path-top"><span className="path-icon">{icon}</span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><button onClick={action}>{cta}<ArrowRight size={17}/></button></article> }
 
 function Footer({navigate, hasProfile}) {
-
   const socials = [
-    {
-      label: 'Facebook',
-      d: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z',
-      url: 'https://www.facebook.com/share/1L555YX6ZP/'
-    },
-    {
-      label: 'Instagram',
-      d: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z',
-      url: 'https://www.instagram.com/nuji_project?igsi=MTA0NzZ2ejFyazJ2OA=='
-    },
-    {
-      label: 'Telegram',
-      d: 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z',
-      url: 'https://t.me/nujiproject'
-    },
-    {
-      label: 'WhatsApp',
-      d: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z',
-      url: 'https://whatsapp.com/channel/0029Vb7ssy1G3R3dQSGay21w'
-    },
-    {
-      label: 'Twitter/X',
-      d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z',
-      url: '' // link TBD — add when ready
-    },
-    {
-      label: 'TikTok',
-      d: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84.02 8.76-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.3-.67.31-1.06.04-2.26.02-4.51.02-6.77.02-2.93-.01-5.85.02-8.78z',
-      url: 'https://www.tiktok.com/@ahiachiwondikom?_r=1&_t=ZS-99L0somzffd'
-    },
+    { label: 'Facebook', d: 'M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z' },
+    { label: 'Instagram', d: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z' },
+    { label: 'Telegram', d: 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z' },
+    { label: 'WhatsApp', d: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z' },
+    { label: 'Twitter/X', d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z' },
+    { label: 'TikTok', d: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84.02 8.76-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.3-.67.31-1.06.04-2.26.02-4.51.02-6.77.02-2.93-.01-5.85.02-8.78z' },
   ];
-
-  return (
-    <footer className="footer">
-      <div className="container footer-grid">
-        <div>
-          <button className="brand footer-brand" onClick={() => navigate('home')}>
-            <img className="brand-logo" src="/assets/nuji-logo.png" alt=""/>
-            <span>nuji</span>
-          </button>
-          <p>Language data made by the people who speak it.</p>
-          <div className="footer-social">
-            {socials.map(s => (
-              <a
-                key={s.label}
-                href={s.url || '#'}
-                target={s.url ? '_blank' : undefined}
-                rel={s.url ? 'noopener noreferrer' : undefined}
-                aria-label={s.label}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d={s.d}/>
-                </svg>
-              </a>
-            ))}
-          </div>
-        </div>
-        <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
-  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>
-  );
+  return <footer className="footer"><div className="container footer-grid">
+    <div><button className="brand footer-brand" onClick={() => navigate('home')}><img className="brand-logo" src="/assets/nuji-logo.png" alt=""/><span>nuji</span></button><p>Language data made by the people who speak it.</p>
+      <div className="footer-social">
+        {socials.map(s => <a key={s.label} href="#" aria-label={s.label}><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d={s.d}/></svg></a>)}
+      </div>
+    </div>
+    <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
+  </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian </span></div></footer>;
 }
 
 createRoot(document.getElementById('root')).render(<App />);
