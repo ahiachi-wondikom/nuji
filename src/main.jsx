@@ -978,9 +978,9 @@ function Field({label, children}) { return <label className="form-field"><span>{
 function Trust({icon,title,text}) { return <div className="trust-item"><span>{icon}</span><div><b>{title}</b><small>{text}</small></div></div> }
 
 const exampleResponses = [
-  "Nna men! Where you dey? E don tey — kedu ka ị mere? Hope everything dey okay sha.",
-  "Biko come help me carry this thing, my body no fit again — agwụọla m ike!",
-  "Oya let's go! Time waits for no one — anyị gaghị abia oge!",
+  "Nna men! Where you dey? E don tey — kedu ka i mere? Hope everything dey okay sha.",
+  "Biko come help me carry this thing, my body no fit again — agwuola m ike!",
+  "Oya let's go! Time waits for no one — anyi gaghi abia oge!",
 ];
 const formalityLevels = ['Very Casual', 'Normal', 'Formal'];
 
