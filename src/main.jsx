@@ -301,6 +301,7 @@ function App() {
 
   // icons only appear once a FULL profile exists in the database
   const hasProfile = !!(profile && profile.hasProfile);
+  const loggedIn = !!phone;
   const profileData = profile || DEMO_PROFILE;
 
   const navigate = (next) => { const path = pathMap[next] || '/'; window.history.pushState({}, '', path); setPage(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
@@ -348,10 +349,10 @@ function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">Skip to main content</a>
-      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} points={profileData.points} />
+      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} points={profileData.points} />
       <main id="main">
-        {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} hasProfile={hasProfile} />}
-        {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} />}
+        {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} hasProfile={hasProfile} loggedIn={loggedIn} />}
+        {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} />}
         {page === 'join' && <Join navigate={navigate} language={language} setLanguage={setLanguage} phone={phone} setPhone={setPhone} onSaved={refreshProfile} />}
         {page === 'contribute' && <Contribute language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} navigate={navigate} online={online} />}
         {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
@@ -360,7 +361,7 @@ function App() {
         {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
         {page === 'admin' && <Admin />}
       </main>
-      {page !== 'admin' && <Footer navigate={navigate} hasProfile={hasProfile} />}
+      {page !== 'admin' && <Footer navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} />}
       {pendingSync > 0 && (
         <div className="offline-banner">
           {online ? '🔄 Uploading your offline contributions…' : `📴 Offline mode — ${pendingSync} contribution${pendingSync !== 1 ? 's' : ''} saved on this device, will sync automatically when you're online`}
@@ -370,19 +371,20 @@ function App() {
   );
 }
 
-function Nav({ page, menuOpen, setMenuOpen, navigate, hasProfile, points }) {
+function Nav({ page, menuOpen, setMenuOpen, navigate, hasProfile, loggedIn, points }) {
   const links = [['home', 'Home'], ['about', 'About'], ['join', 'Contribute'], ['listen', 'Listen'], ['leaderboard', 'Leaderboard'], ['state', 'State']];
+  const resolveKey = (key) => (key === 'join' && loggedIn) ? 'contribute' : key;
   return <>
     <header className="nav-wrap">
       <nav className="nav container" aria-label="Main navigation">
         <button className="brand" onClick={() => navigate('home')} aria-label="Nuji home"><img className="brand-logo" src="/assets/nuji-logo.png" alt=""/><span>nuji</span></button>
         <div className="nav-links">
-          {links.map(([key,label]) => <button key={key} className={page === key ? 'nav-link active' : 'nav-link'} onClick={() => navigate(key)}>{label}</button>)}
+          {links.map(([key,label]) => <button key={key} className={page === resolveKey(key) ? 'nav-link active' : 'nav-link'} onClick={() => navigate(resolveKey(key))}>{label}</button>)}
         </div>
         <div className="nav-actions">
           <button className="language-nav"><span className="dot"/> Igbo <ChevronDown size={16}/></button>
           {hasProfile && <button className="points-pill" onClick={() => navigate('profile')} aria-label="View points"><Award size={14}/> {points}</button>}
-          <button className="btn btn-primary nav-cta" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute <ArrowRight size={16}/></button>
+          <button className="btn btn-primary nav-cta" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Contribute <ArrowRight size={16}/></button>
           {hasProfile && <button className={page === 'profile' ? 'profile-avatar active' : 'profile-avatar'} onClick={() => navigate('profile')} aria-label="My profile"><User size={17}/></button>}
           <button className="menu-btn" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={23}/></button>
         </div>
@@ -391,15 +393,15 @@ function Nav({ page, menuOpen, setMenuOpen, navigate, hasProfile, points }) {
     <div className={menuOpen ? 'mobile-menu open' : 'mobile-menu'} aria-hidden={!menuOpen}>
       <div className="mobile-menu-top"><button className="brand" onClick={() => navigate('home')}><img className="brand-logo" src="/assets/nuji-logo.png" alt=""/><span>nuji</span></button><button className="icon-btn" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X/></button></div>
       <div className="mobile-links">
-        {links.map(([key,label], i) => <button key={key} onClick={() => navigate(key)}><span>0{i + 1}</span>{label}<ArrowRight size={18}/></button>)}
+        {links.map(([key,label], i) => <button key={key} onClick={() => navigate(resolveKey(key))}><span>0{i + 1}</span>{label}<ArrowRight size={18}/></button>)}
         {hasProfile && <button onClick={() => navigate('profile')}><span>0{links.length + 1}</span>My Profile<ArrowRight size={18}/></button>}
       </div>
-      <button className="btn btn-primary mobile-cta" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start contributing <ArrowRight size={17}/></button>
+      <button className="btn btn-primary mobile-cta" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Start contributing <ArrowRight size={17}/></button>
     </div>
   </>;
 }
 
-function Home({ navigate, language, setLanguage, hasProfile }) {
+function Home({ navigate, language, setLanguage, hasProfile, loggedIn }) {
   return <>
     <section className="hero wave-bg">
       <div className="container hero-grid">
@@ -407,7 +409,7 @@ function Home({ navigate, language, setLanguage, hasProfile }) {
           <div className="eyebrow"><span className="pulse-dot"/> Made with voices across Nigeria</div>
           <h1>Technology that <em>understands</em> home.</h1>
           <p>Help build voice data in the languages Nigerians actually use — at the market, with family, and everywhere in between.</p>
-          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
+          <div className="hero-actions"><button className="btn btn-primary" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Add your voice <ArrowRight size={18}/></button><button className="text-action" onClick={() => navigate('leaderboard')}>See community progress <ArrowRight size={17}/></button></div>
           <div className="hero-note"><span className="avatars"><i>A</i><i>C</i><i>T</i></span><span>Join people making language visible.</span></div>
         </div>
         <div className="sound-stage" aria-label="Example recording contribution">
@@ -432,12 +434,12 @@ function Home({ navigate, language, setLanguage, hasProfile }) {
 
     <section className="section language-section layered-surface">
       <div className="container"><div className="section-heading"><div><div className="eyebrow">Choose a language</div><h2>Start with the words you know.</h2></div><p>Every phrase helps make the next interaction feel a little more familiar.</p></div>
-      <div className="language-grid">{languages.map(lang => <button className={`language-card ${lang.color}`} onClick={() => {setLanguage(lang);navigate(hasProfile ? 'contribute' : 'join')}} key={lang.name}><div className="lang-card-top"><span>{lang.name}</span><ArrowRight size={20}/></div><div className="lang-native">{lang.native}</div><p>“{lang.sample.replace(/[“”]/g,'')}”</p><div className="card-lines"/></button>)}</div></div>
+      <div className="language-grid">{languages.map(lang => <button className={`language-card ${lang.color}`} onClick={() => {setLanguage(lang);navigate(loggedIn ? 'contribute' : 'join')}} key={lang.name}><div className="lang-card-top"><span>{lang.name}</span><ArrowRight size={20}/></div><div className="lang-native">{lang.native}</div><p>“{lang.sample.replace(/[“”]/g,'')}”</p><div className="card-lines"/></button>)}</div></div>
     </section>
 
     <section className="section contribution-section">
       <div className="container"><div className="contribute-heading"><div className="eyebrow ink">Three ways to help</div><h2>Small moments. <em>Real</em> impact.</h2></div><div className="path-grid">
-        <Path icon={<Mic/>} number="01" title="Speak a sentence" text="Read short prompts aloud in the language you use every day." cta="Start speaking" action={() => navigate(hasProfile ? 'contribute' : 'join')} tone="green"/>
+        <Path icon={<Mic/>} number="01" title="Speak a sentence" text="Read short prompts aloud in the language you use every day." cta="Start speaking" action={() => navigate(loggedIn ? 'contribute' : 'join')} tone="green"/>
         <Path icon={<Headphones/>} number="02" title="Listen and validate" text="Help make sure recordings sound natural and clear." cta="Start listening" action={() => navigate('listen')} tone="green"/>
         <Path icon={<Volume2/>} number="03" title="Build the archive" text="Each contribution protects the way our communities speak." cta="See progress" action={() => navigate('leaderboard')} tone="green"/>
       </div></div>
@@ -454,16 +456,16 @@ function Home({ navigate, language, setLanguage, hasProfile }) {
           <div className="eyebrow">Rooted in culture</div>
           <h2>Not textbook language. <em>Life</em> as it is spoken.</h2>
           <p>From Lagos to Kano and Enugu, everyday voices carry expressions, humour, memory, and place. Nuji gives those voices a place in the technologies being built now.</p>
-          <button className="text-action" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute a sentence <ArrowRight size={17}/></button>
+          <button className="text-action" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Contribute a sentence <ArrowRight size={17}/></button>
         </div>
       </div>
     </section>
 
-    <section className="final-cta"><div className="container final-inner"><div><div className="eyebrow">Your turn</div><h2>Your voice belongs<br/>in the dataset.</h2></div><button className="btn btn-light" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute now <ArrowRight size={18}/></button></div></section>
+    <section className="final-cta"><div className="container final-inner"><div><div className="eyebrow">Your turn</div><h2>Your voice belongs<br/>in the dataset.</h2></div><button className="btn btn-light" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Contribute now <ArrowRight size={18}/></button></div></section>
   </>;
 }
 
-function About({ navigate, hasProfile }) {
+function About({ navigate, hasProfile, loggedIn }) {
   const privacy = [
     'Your voice recordings are used only to train Nigerian language AI models',
     'We never sell your data to third parties',
@@ -484,7 +486,7 @@ function About({ navigate, hasProfile }) {
             <div className="eyebrow">About Nuji</div>
             <h1>Technology that speaks<br /><em>your language.</em></h1>
             <p>Why should AI only work for a few of the world's languages? Our language is our story, our community, our culture. Nuji is building the datasets we want to see in the world.</p>
-            <button className="btn btn-primary" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start contributing <ArrowRight size={18} /></button>
+            <button className="btn btn-primary" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Start contributing <ArrowRight size={18} /></button>
           </div>
           <div className="about-mark">
             <div className="market-woman-svg">
@@ -547,7 +549,7 @@ function About({ navigate, hasProfile }) {
             <h2>Every voice brings<br />us one step closer.</h2>
             <p>Every sentence you speak or type brings Nigerian language AI one step closer to reality.</p>
           </div>
-          <button className="btn btn-light" onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Start Contributing <ArrowRight size={18} /></button>
+          <button className="btn btn-light" onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Start Contributing <ArrowRight size={18} /></button>
         </div>
         <p className="about-signoff">Built for the people. Powered by their voice. 🇳🇬</p>
       </section>
@@ -744,6 +746,7 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
   const [step, setStep] = useState('phone');
   const [localPhone, setLocalPhone] = useState(phone);
   const [phoneError, setPhoneError] = useState('');
+  const [phoneSubmitting, setSubmittingPhone] = useState(false);
   const [returning, setReturning] = useState(false); // existing phone with a full profile
   const [quick, setQuick] = useState({ state: '', age: '', gender: '' });
   const [quickLang, setQuickLang] = useState('Igbo'); // independent — not tied to the rest of the app
@@ -756,20 +759,26 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
   // 1) phone screen -> validates Nigerian number, checks if returning user
   const submitPhone = async (e) => {
     e.preventDefault();
+    if (phoneSubmitting) return;
     const normalized = normalizeNaija(localPhone);
     if (!validNaijaPhone(normalized)) {
       setPhoneError('Enter a valid Nigerian number, e.g. 0803 123 4567');
       return;
     }
     setPhoneError('');
+    setSubmittingPhone(true);
     setLocalPhone(normalized);
     setPhone(normalized);
-    const res = await api.checkPhone(normalized);
-    // Registered member (full profile) -> straight to the profile dashboard
-    if (res && res.hasProfile) { navigate('contribute'); return; }
-    // Brand-new number OR previously quick-contributed -> show both options
-    setReturning(false);
-    setStep('choose');
+    try {
+      const res = await api.checkPhone(normalized);
+      // Registered member (full profile) -> straight to the profile dashboard
+      if (res && res.hasProfile) { navigate('contribute'); return; }
+      // Brand-new number OR previously quick-contributed -> show both options
+      setReturning(false);
+      setStep('choose');
+    } finally {
+      setSubmittingPhone(false);
+    }
   };
 
   // 2) quick contribute -> three quick questions, then straight to Speak
@@ -950,10 +959,10 @@ function Join({ navigate, language, setLanguage, phone, setPhone, onSaved }) {
           <p>Enter your phone number to continue. New here? We'll set you up in seconds.</p>
           <form onSubmit={submitPhone}>
             <Field label="Phone Number">
-              <input value={localPhone} onChange={e => { setLocalPhone(e.target.value); setPhoneError(''); }} placeholder="0803 123 4567" inputMode="tel" required/>
+              <input value={localPhone} onChange={e => { setLocalPhone(e.target.value); setPhoneError(''); }} placeholder="0803 123 4567" inputMode="tel" required disabled={phoneSubmitting}/>
               {phoneError && <small style={{color:'#c0392b',fontWeight:700}}>{phoneError}</small>}
             </Field>
-            <button className="btn btn-primary phone-submit" type="submit">Continue <ArrowRight size={18}/></button>
+            <button className="btn btn-primary phone-submit" type="submit" disabled={phoneSubmitting} aria-busy={phoneSubmitting}>{phoneSubmitting ? 'Please wait…' : <>Continue <ArrowRight size={18}/></>}</button>
           </form>
           <div className="phone-key">
             <span>🔑</span>
@@ -978,9 +987,9 @@ function Field({label, children}) { return <label className="form-field"><span>{
 function Trust({icon,title,text}) { return <div className="trust-item"><span>{icon}</span><div><b>{title}</b><small>{text}</small></div></div> }
 
 const exampleResponses = [
-  "Nna men! Where you dey? E don tey — kedu ka ị mere? Hope everything dey okay sha.",
-  "Biko come help me carry this thing, my body no fit again — agwụọla m ike!",
-  "Oya let's go! Time waits for no one — anyị gaghị abia oge!",
+  "Nna men! Where you dey? E don tey — kedu ka i mere? Hope everything dey okay sha.",
+  "Biko come help me carry this thing, my body no fit again — agwuola m ike!",
+  "Oya let's go! Time waits for no one — anyi gaghi abia oge!",
 ];
 const formalityLevels = ['Very Casual', 'Normal', 'Formal'];
 
@@ -1330,7 +1339,7 @@ function LanguageSelect({language,setLanguage}) { const [open,setOpen]=useState(
 function Stat({number,label,accent}) { return <div className={`stat ${accent}`}><strong>{number}</strong><span>{label}</span><i/></div> }
 function Path({icon,number,title,text,cta,action,tone}) { return <article className={`path-card ${tone}`}><div className="path-top"><span className="path-icon">{icon}</span><span>{number}</span></div><h3>{title}</h3><p>{text}</p><button onClick={action}>{cta}<ArrowRight size={17}/></button></article> }
 
-function Footer({navigate, hasProfile}) {
+function Footer({navigate, hasProfile, loggedIn}) {
 
   const socials = [
     {
@@ -1354,14 +1363,9 @@ function Footer({navigate, hasProfile}) {
       url: 'https://whatsapp.com/channel/0029Vb7ssy1G3R3dQSGay21w'
     },
     {
-      label: 'Twitter/X',
-      d: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z',
-      url: '' // link TBD — add when ready
-    },
-    {
       label: 'TikTok',
       d: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84.02 8.76-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.3-.67.31-1.06.04-2.26.02-4.51.02-6.77.02-2.93-.01-5.85.02-8.78z',
-      url: 'https://www.tiktok.com/@ahiachiwondikom?_r=1&_t=ZS-99L0somzffd'
+      url: 'https://www.tiktok.com/@nuji_project?_r=1&_t=ZS-99eAYarHplR'
     },
   ];
 
@@ -1390,7 +1394,7 @@ function Footer({navigate, hasProfile}) {
             ))}
           </div>
         </div>
-        <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(hasProfile ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
+        <div className="footer-links"><div><span>Explore</span><button onClick={() => navigate(loggedIn ? 'contribute' : 'join')}>Contribute</button><button onClick={() => navigate('listen')}>Listen</button><button onClick={() => navigate('leaderboard')}>Leaderboard</button><button onClick={() => navigate('state')}>State vs State</button></div><div><span>Languages</span><button>Igbo</button><button>Yoruba</button><button>Hausa</button><button>Pidgin</button></div></div>
   </div><div className="container footer-bottom"><span>© 2026 Nuji. Built for voices.</span><span>Open · Community-led · Nigerian · <button className="footer-admin" onClick={() => { window.location.assign('/admin'); }}>Admin</button></span></div></footer>
   );
 }
