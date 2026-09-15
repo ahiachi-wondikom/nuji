@@ -2,6 +2,9 @@
 // Nuji backend — Express API server (port 4000)
 // Run with:  npm run server
 // ============================================================
+import 'dotenv/config';
+
+
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
