@@ -956,7 +956,7 @@ function Admin() {
                   {PROMPT_CATS.map(c => <option key={c}>{c}</option>)}
                 </select>
                 <button className="btn btn-primary" onClick={async () => {
-                  const lines = bulkText.split('\n');
+                 const lines = bulkText.split(/\r?\n/);
                   const r = await api.adminBulkPrompts({ lines, language: bulkLang, category: bulkCat });
                   setPromptMsg(r && r.ok ? `Imported ${r.count} prompts ✓` : 'Import failed');
                   setBulkText(''); api.adminPrompts().then(setPrompts); setTimeout(() => setPromptMsg(''), 2000);
