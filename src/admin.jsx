@@ -650,19 +650,25 @@ function Admin() {
   const [copied, setCopied] = useState(false);
 
   const setToken = (t) => { try { t ? localStorage.setItem('nuji_admin_token', t) : localStorage.removeItem('nuji_admin_token'); } catch {} setTokenState(t); };
-  const load = useCallback(() => {
-   api.adminOverview().then(d => {
-    if (d) setData(d);
-    else { console.warn('Overview returned null - keeping token'); }
-   });
-}, []);
+ const load = useCallback(() => {
+    api.adminOverview().then(d => {
+      if (d) setData(d);
+      // do NOT delete token if overview fails - server may be sleeping
+    });
+  }, []);
   useEffect(() => { if (token) load(); }, [token, load]);
   useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics && api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts && api.adminPrompts().then(setPrompts); }, [tab, token]);
 
   const login = async (e) => {
     e.preventDefault();
     const res = await api.adminLogin(email, password);
-    if (res && res.token) { setToken(res.token); setError(''); }
+    if (res && res.token) { 
+      setToken(res.token);
+      setTokenState(res.token);
+      try { localStorage.setItem('nuji_admin_token', res.token); } catch {}
+      setError('');
+      load();
+    }
     else setError('Invalid email or password');
   };
   const logout = () => { setToken(''); setData(null); };
