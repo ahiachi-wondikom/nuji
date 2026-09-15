@@ -651,10 +651,11 @@ function Admin() {
 
   const setToken = (t) => { try { t ? localStorage.setItem('nuji_admin_token', t) : localStorage.removeItem('nuji_admin_token'); } catch {} setTokenState(t); };
   const load = useCallback(() => {
-    api.adminOverview().then(d => {
-      if (d) setData(d);
-     else { console.warn('Overview returned null - keeping token'); }
-  }, []);
+   api.adminOverview().then(d => {
+    if (d) setData(d);
+    else { console.warn('Overview returned null - keeping token'); }
+   });
+}, []);
   useEffect(() => { if (token) load(); }, [token, load]);
   useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics && api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts && api.adminPrompts().then(setPrompts); }, [tab, token]);
 
