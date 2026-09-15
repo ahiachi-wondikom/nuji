@@ -213,5 +213,7 @@
       "createdAt": "2026-08-07T11:00:43.341Z"
     }
   ],
-  "reviews": []
+  "reviews": [],
+  "prompts": [],
+  "promptSeq": 1
 }

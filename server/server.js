@@ -322,9 +322,9 @@ app.get('/api/stats', (req, res) => {
 });
 
 // ================= ADMIN (token-protected) =================
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@nuji.ng';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'nuji-admin-2026';
-const SECRET = process.env.ADMIN_SECRET || 'nuji-dev-secret';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const SECRET = process.env.ADMIN_SECRET;
 
 const signToken = (payload) => {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
