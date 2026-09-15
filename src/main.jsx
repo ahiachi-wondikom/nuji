@@ -15,26 +15,9 @@ const languages = [
   { name: 'Pidgin', native: 'Naija Pidgin', sample: 'How you dey today?', color: 'green' },
 ];
 
-const FALLBACK_RANKS = [
-  ['Amina Yusuf', 'Hausa', '1,240'],
-  ['Chiamaka Okoro', 'Igbo', '1,126'],
-  ['Tunde Adeyemi', 'Yoruba', '978'],
-  ['Blessing James', 'Pidgin', '842'],
-  ['Sani Garba', 'Hausa', '770'],
-];
+const FALLBACK_RANKS = [];
 
-const FALLBACK_STATES = [
-  { name: 'Anambra', zone: 'South East', points: 6864, contributors: 1, submissions: 44 },
-  { name: 'Borno', zone: 'North East', points: 22, contributors: 1, submissions: 2 },
-  { name: 'Lagos', zone: 'South West', points: 154, contributors: 3, submissions: 12 },
-  { name: 'Enugu', zone: 'South East', points: 89, contributors: 2, submissions: 7 },
-  { name: 'Kano', zone: 'North West', points: 45, contributors: 1, submissions: 4 },
-  { name: 'Oyo', zone: 'South West', points: 67, contributors: 2, submissions: 5 },
-  { name: 'Rivers', zone: 'South South', points: 34, contributors: 1, submissions: 3 },
-  { name: 'Kaduna', zone: 'North West', points: 28, contributors: 1, submissions: 2 },
-  { name: 'Plateau', zone: 'North Central', points: 19, contributors: 1, submissions: 1 },
-  { name: 'Edo', zone: 'South South', points: 41, contributors: 2, submissions: 4 },
-];
+const FALLBACK_STATES = [];
 
 const zones = ['All States', 'South East', 'South West', 'South South', 'North Central', 'North East', 'North West'];
 
@@ -207,29 +190,29 @@ const recentWeeks = [0,1,0,0,0, 0,2,0,1,0, 0,1,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,
 
 // Demo profile shown only when the backend is unreachable
 const DEMO_PROFILE = {
-  phone: '', nickname: '', state: 'Anambra', lga: '',
-  points: 153, rank: 1, submissions: 43, reviews: 9,
-  level: 'Expert Contributor', levelProgress: 73, levelTarget: 100, streak: 1,
-  profileKind: 'full', hasProfile: true,
-  overview: [
-    { icon: 'total', number: 43, label: 'Total' },
-    { icon: 'text', number: 25, label: 'Text Only' },
-    { icon: 'voice', number: 4, label: 'Voice Only' },
-    { icon: 'both', number: 14, label: 'Text + Voice' },
-    { icon: 'mix', number: 3, label: 'Code-switched' },
-    { icon: 'reviews', number: 9, label: 'Reviews Done' }
-  ],
-  breakdown: [
-    { label: 'Text only', count: 1, rate: 3 },
-    { label: 'Voice only', count: 0, rate: 2 },
-    { label: 'Text + Voice', count: 0, rate: 5 }
-  ],
-  activityCells: [...Array(371 - recentWeeks.length).fill(0), ...recentWeeks],
-  activityMonths: ['S', 'O', 'N', 'D', 'J', 'F', 'M', 'A', 'M', 'J', 'J', 'A'],
-  badges: FALLBACK_BADGES,
-  badgesEarned: FALLBACK_BADGES.filter(b => b.earned).length,
-  badgesTotal: FALLBACK_BADGES.length,
-  referral: { url: 'https://nuji-test.netlify.app/?ref=', joined: 0, points: 0 }
+  // phone: '', nickname: '', state: 'Anambra', lga: '',
+  // points: 153, rank: 1, submissions: 43, reviews: 9,
+  // level: 'Expert Contributor', levelProgress: 73, levelTarget: 100, streak: 1,
+  // profileKind: 'full', hasProfile: true,
+  // overview: [
+  //   { icon: 'total', number: 43, label: 'Total' },
+  //   { icon: 'text', number: 25, label: 'Text Only' },
+  //   { icon: 'voice', number: 4, label: 'Voice Only' },
+  //   { icon: 'both', number: 14, label: 'Text + Voice' },
+  //   { icon: 'mix', number: 3, label: 'Code-switched' },
+  //   { icon: 'reviews', number: 9, label: 'Reviews Done' }
+  // ],
+  // breakdown: [
+  //   { label: 'Text only', count: 1, rate: 3 },
+  //   { label: 'Voice only', count: 0, rate: 2 },
+  //   { label: 'Text + Voice', count: 0, rate: 5 }
+  // ],
+  // activityCells: [...Array(371 - recentWeeks.length).fill(0), ...recentWeeks],
+  // activityMonths: ['S', 'O', 'N', 'D', 'J', 'F', 'M', 'A', 'M', 'J', 'J', 'A'],
+  // badges: FALLBACK_BADGES,
+  // badgesEarned: FALLBACK_BADGES.filter(b => b.earned).length,
+  // badgesTotal: FALLBACK_BADGES.length,
+  // referral: { url: 'https://nuji-test.netlify.app/?ref=', joined: 0, points: 0 }
 };
 
 // Nigeria's 36 states + FCT with LGAs
@@ -1329,7 +1312,7 @@ function Leaderboard() {
     api.leaderboard().then(r => { if (r && r.length) setRows(r); });
     api.stats().then(s => { if (s) setStats(s); });
   }, []);
-  const ranks = rows || FALLBACK_RANKS;
+  const ranks = rows || [];
 
   return <section className="leader-page wave-bg slim-wave"><div className="container"><div className="leader-hero"><div><div className="eyebrow ink">Community progress</div><h1>Every contribution<br/>moves us <em>forward.</em></h1></div><p>A small thank-you to the people helping Nigerian languages take up the space they deserve.</p></div><div className="leader-stats"><Stat number={stats ? stats.sentences.toLocaleString() : '0'} label="Sentences contributed" accent="green"/><Stat number={stats ? stats.reviews.toLocaleString() : '0'} label="Clips reviewed" accent="green"/><Stat number="4" label="Languages growing" accent="green"/></div><div className="leader-controls"><div className="filters">{['This week','This month','All time'].map(x => <button key={x} className={filter === x ? 'filter active' : 'filter'} onClick={() => setFilter(x)}>{x}</button>)}</div><button className="language-nav leader-lang"><span className="dot"/> All languages <ChevronDown size={16}/></button></div><div className="leaderboard-card"><div className="rank-head"><span>Rank</span><span>Contributor</span><span>Language</span><span>Contributions</span></div>{ranks.map((r,i) => <div className={`rank-row ${i<3 ? 'top-rank' : ''}`} key={r[0]}><span className={`rank-num rank-${i+1}`}>{i<3 ? <Trophy size={18}/> : String(i+1).padStart(2,'0')}</span><span className="person"><i>{r[0].split(' ').map(x => x[0]).join('')}</i><b>{r[0]}</b></span><span className="rank-lang"><span className="dot"/>{r[1]}</span><span className="rank-count">{r[2]}</span></div>)}</div><div className="rank-note"><span><Check size={16}/> Rankings celebrate contribution, not competition.</span><span>Updated today</span></div></div></section>;
 }
