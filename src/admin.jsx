@@ -663,11 +663,9 @@ function Admin() {
     e.preventDefault();
     const res = await api.adminLogin(email, password);
     if (res && res.token) { 
-      setToken(res.token);
-      setTokenState(res.token);
       try { localStorage.setItem('nuji_admin_token', res.token); } catch {}
+      setTokenState(res.token);
       setError('');
-      load();
     }
     else setError('Invalid email or password');
   };
