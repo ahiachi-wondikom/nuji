@@ -649,16 +649,28 @@ function Admin() {
   const [digestMsg, setDigestMsg] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const setToken = (t) => { try { t ? localStorage.setItem('nuji_admin_token', t) : localStorage.removeItem('nuji_admin_token'); } catch {} setTokenState(t); };
- const load = useCallback(() => {
+ const setToken = (t) => { 
+  try { 
+    if (t) {
+      localStorage.setItem('nuji_admin_token', t);
+      document.cookie = `nuji_admin_token=${t}; path=/; max-age=2592000`;
+    } else {
+      localStorage.removeItem('nuji_admin_token');
+      document.cookie = 'nuji_admin_token=; path=/; max-age=0';
+    }
+  } catch {} 
+  setTokenState(t); 
+};
+
+const load = useCallback(() => {
     api.adminOverview().then(d => {
       if (d) setData(d);
       // do NOT delete token if overview fails - server may be sleeping
     });
   }, []);
-  useEffect(() => { if (token) load(); }, [token, load]);
-  useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics && api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts && api.adminPrompts().then(setPrompts); }, [tab, token]);
 
+useEffect(() => { if (token) load(); }, [token, load]);
+useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overview' || tab === 'digest') api.adminAnalytics && api.adminAnalytics().then(setAnalytics); if (tab === 'prompts') api.adminPrompts && api.adminPrompts().then(setPrompts); }, [tab, token]);
   const login = async (e) => {
     e.preventDefault();
     const res = await api.adminLogin(email, password);
