@@ -650,10 +650,10 @@ function Admin() {
   const [copied, setCopied] = useState(false);
 
   const setToken = (t) => { try { t ? localStorage.setItem('nuji_admin_token', t) : localStorage.removeItem('nuji_admin_token'); } catch {} setTokenState(t); };
-  const load = useCallback(() => {
+ const load = useCallback(() => {
     api.adminOverview().then(d => {
       if (d) setData(d);
-      else { setTokenState(''); try { localStorage.removeItem('nuji_admin_token'); } catch {} }
+      // do NOT delete token if overview fails - server may be sleeping
     });
   }, []);
   useEffect(() => { if (token) load(); }, [token, load]);
@@ -662,7 +662,13 @@ function Admin() {
   const login = async (e) => {
     e.preventDefault();
     const res = await api.adminLogin(email, password);
-    if (res && res.token) { setToken(res.token); setError(''); }
+    if (res && res.token) { 
+      setToken(res.token);
+      setTokenState(res.token);
+      try { localStorage.setItem('nuji_admin_token', res.token); } catch {}
+      setError('');
+      load();
+    }
     else setError('Invalid email or password');
   };
   const logout = () => { setToken(''); setData(null); };
@@ -956,7 +962,7 @@ function Admin() {
                   {PROMPT_CATS.map(c => <option key={c}>{c}</option>)}
                 </select>
                 <button className="btn btn-primary" onClick={async () => {
-                  const lines = bulkText.split('\n');
+                 const lines = bulkText.split(/\r?\n/);
                   const r = await api.adminBulkPrompts({ lines, language: bulkLang, category: bulkCat });
                   setPromptMsg(r && r.ok ? `Imported ${r.count} prompts ✓` : 'Import failed');
                   setBulkText(''); api.adminPrompts().then(setPrompts); setTimeout(() => setPromptMsg(''), 2000);
