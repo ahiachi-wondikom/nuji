@@ -49,15 +49,21 @@ create table if not exists contributions (
   created_at timestamptz default now()
 );
 
--- Daily prompts (the server auto-seeds 120 starter prompts on first boot)
+-- Daily prompts (managed entirely through the admin panel — the server
+-- does not seed any prompts on boot; categories default to 'Greetings'
+-- to match server/server.supabase.js)
 create table if not exists prompts (
   id serial primary key,
   language text not null,
   text text not null,
+  category text not null default 'Greetings',
   is_active boolean default true,
   uses int default 0,
   created_at timestamptz default now()
 );
+
+-- Safe to re-run on an existing database that predates the category column.
+alter table prompts add column if not exists category text not null default 'Greetings';
 
 -- Storage bucket for voice recordings (publicly playable)
 insert into storage.buckets (id, name, public)

@@ -17,7 +17,7 @@ cd nuji-next
 ## 1. Database — Supabase (5 min)
 1. Open the file **`supabase-schema.sql`** from this project, copy ALL of it, paste into the editor, click **Run**.
    - You should see *"Success. No rows returned."* ✅
-   - (This creates the `users`, `contributions`, `prompts` tables + the voice-recordings storage bucket. The server fills the prompt library automatically on first start.)
+   - (This creates the `users`, `contributions`, `prompts` tables + the voice-recordings storage bucket. Prompts are NOT auto-seeded — add them yourself from the admin panel's Prompt Manager after deploying.)
 2. Left sidebar → **Settings (⚙) → API**. Copy these two values and keep them in a note:
    - **Project URL** → looks like `https://abcdefgh.supabase.co`
    - **service_role key** → click *Reveal* → copy (🔒 secret — never share it publicly or put it in frontend code)
@@ -39,6 +39,9 @@ cd nuji-next
    | `SUPABASE_SERVICE_KEY` | your service_role key |
    | `ADMIN_EMAIL` | choose an admin email, e.g. `admin@nuji.ng` |
    | `ADMIN_PASSWORD` | choose a strong password |
+   | `ADMIN_SECRET` *(optional)* | a random string used to sign admin session tokens; if omitted, `SUPABASE_SERVICE_KEY` is reused for this instead |
+
+   ⚠️ Admin login is disabled entirely until `ADMIN_EMAIL` and `ADMIN_PASSWORD` are both set — there is no default/fallback credential.
 
 5. Click **Create Web Service**. Wait for deploy (~2 min).
 6. Copy your backend URL → looks like `https://nuji-api.onrender.com`.
