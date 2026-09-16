@@ -1,88 +1,16 @@
 // ============================================================
-// Nuji backend database — simple JSON file storage (no setup)
+// Nuji shared scoring/badge/activity helpers.
+//
+// This file used to also provide a JSON-file-backed local database
+// (with hardcoded demo/seed users) for a JSON-store server mode.
+// That mode has been removed — Nuji is Supabase-only now, so this
+// file exports only the pure, stateless helpers that both the
+// (retired) legacy server and the Supabase server relied on. There
+// is no local storage, no seed data, and no way for demo users to
+// leak into real leaderboard/state data.
 // ============================================================
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, 'db.json');
 
 const today = () => new Date().toISOString().slice(0, 10);
-
-function blankUser(phone) {
-  return {
-    phone,
-    nickname: '',
-    state: '',
-    lga: '',
-    age: '',
-    gender: '',
-    languages: [],
-    contributionLang: 'Igbo',
-    createdAt: new Date().toISOString(),
-    refCode: 'NJ' + phone.replace(/\D/g, '').slice(-6),
-    referredBy: null,
-    referrals: 0,
-    points: 0,
-    subs: { text: 0, voice: 0, both: 0, mix: 0 },
-    langCounts: {},
-    reviews: 0,
-    days: {},          // { '2026-08-07': 2 } contribution counts per day
-    streak: 0,
-    bestStreak: 0,
-    lastDay: null,
-    earlyBird: false,
-    profileKind: null   // 'full' | 'quick' | null
-  };
-}
-
-// ---------- seed demo data so the site looks alive on first run ----------
-function seed() {
-  const mk = (phone, nickname, state, points, subs, reviews, lang) => {
-    const u = blankUser(phone);
-    u.nickname = nickname; u.state = state; u.points = points; u.subs = subs;
-    u.reviews = reviews; u.earlyBird = true; u.bestStreak = 14; u.streak = 1;
-    u.lastDay = today(); u.days = { [today()]: 1 };
-    u.langCounts[lang] = (subs.text + subs.voice + subs.both);
-    u.contributionLang = lang;
-    return u;
-  };
-  const users = {};
-  const list = [
-    ['08011110001', 'Amina Yusuf', 'Kano', 1240, { text: 300, voice: 210, both: 180, mix: 40 }, 220, 'Hausa'],
-    ['08011110002', 'Chiamaka Okoro', 'Anambra', 1126, { text: 280, voice: 190, both: 170, mix: 35 }, 205, 'Igbo'],
-    ['08011110003', 'Tunde Adeyemi', 'Oyo', 978, { text: 250, voice: 160, both: 150, mix: 28 }, 180, 'Yoruba'],
-    ['08011110004', 'Blessing James', 'Rivers', 842, { text: 210, voice: 140, both: 130, mix: 22 }, 150, 'Pidgin'],
-    ['08011110005', 'Sani Garba', 'Kaduna', 770, { text: 190, voice: 130, both: 120, mix: 18 }, 130, 'Hausa']
-  ];
-  for (const [p, n, s, pts, subs, rev, lang] of list) users[p] = mk(p, n, s, pts, subs, rev, lang);
-  return { users, contributions: [], reviews: [] };
-}
-
-let db;
-try {
-  db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-} catch {
-  db = seed();
-  save();
-}
-
-export function save() {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-}
-
-export const getDB = () => db;
-
-export const findUser = (phone) => db.users[normalizePhone(phone)] || null;
-
-export const normalizePhone = (phone) => String(phone || '').replace(/\s/g, '');
-
-export function createUser(phone) {
-  const p = normalizePhone(phone);
-  if (!db.users[p]) { db.users[p] = blankUser(p); save(); }
-  return db.users[p];
-}
 
 // ---------------- scoring / levels ----------------
 export const POINT_RULES = { text: 3, voice: 5, both: 8, mix: 3, review: 1, referral: 10 };
@@ -157,12 +85,6 @@ export function bumpDay(u) {
   u.streak = u.lastDay === yesterday.toISOString().slice(0, 10) ? u.streak + 1 : 1;
   u.bestStreak = Math.max(u.bestStreak, u.streak);
   u.lastDay = t;
-}
-
-// ---------------- ranking ----------------
-export function rankOf(phone) {
-  const sorted = Object.values(db.users).sort((a, b) => b.points - a.points);
-  return sorted.findIndex(u => u.phone === normalizePhone(phone)) + 1 || 1;
 }
 
 export function topLanguage(u) {

@@ -1,7 +1,11 @@
 // ============================================================
 // Nuji PRODUCTION backend — Supabase (Postgres + Storage)
-//   Run locally : SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npm run start:supabase
-//   Deploy      : Render with the same two env vars, start: npm run start:supabase
+// This is the ONLY backend Nuji runs — there is no local/JSON fallback.
+//   Run locally : npm run server   (reads env vars from .env.local)
+//   Deploy      : npm start        (reads env vars from the platform)
+//   Required env vars: SUPABASE_URL, SUPABASE_SERVICE_KEY,
+//                       ADMIN_EMAIL, ADMIN_PASSWORD (admin login is
+//                       disabled until these last two are set — see below)
 // ============================================================
 import express from 'express';
 import cors from 'cors';
@@ -171,24 +175,29 @@ app.get('/api/profile/:phone', async (req, res) => {
 
 // ================= PROMPTS =================
 app.get('/api/prompts', async (req, res) => {
-  const language = req.query.language || 'Igbo';
-  const seed = parseInt(req.query.seed || '0', 10);
-  // RATIONING: a prompt is shown to at most 2 contributors, then the next one rotates in
-  // Prompts are English source sentences — same prompt for every language (contributors translate it)
-  let { data } = await supabase.from('prompts').select('*')
-    .eq('is_active', true).lt('uses', 2)
-    .order('uses').order('id').limit(1);
-  if (!data || !data.length) {
-    ({ data } = await supabase.from('prompts').select('*')
-      .eq('is_active', true)
-      .order('uses').order('id').limit(1));
-  }
-  if (data && data[0]) {
-    const p = data[0];
-    await supabase.from('prompts').update({ uses: (p.uses || 0) + 1 }).eq('id', p.id);
-    return res.json({ text: p.text, language, id: p.id, uses: (p.uses || 0) + 1 });
-  }
-  res.json({ text: '', language });
+  try {
+    const language = req.query.language || 'Igbo';
+    // RATIONING: a prompt is shown to at most 2 contributors, then the next one rotates in
+    // Prompts are English source sentences — same prompt for every language (contributors translate it)
+    let { data, error } = await supabase.from('prompts').select('*')
+      .eq('is_active', true).lt('uses', 2)
+      .order('uses').order('id').limit(1);
+    if (error) throw error;
+    if (!data || !data.length) {
+      ({ data, error } = await supabase.from('prompts').select('*')
+        .eq('is_active', true)
+        .order('uses').order('id').limit(1));
+      if (error) throw error;
+    }
+    if (data && data[0]) {
+      const p = data[0];
+      const { error: updErr } = await supabase.from('prompts').update({ uses: (p.uses || 0) + 1 }).eq('id', p.id);
+      if (updErr) throw updErr;
+      return res.json({ text: p.text, language, id: p.id, uses: (p.uses || 0) + 1 });
+    }
+    // Genuinely no active prompts in the database — not an error, just empty.
+    res.json({ text: '', language });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ================= CONTRIBUTIONS =================
@@ -342,10 +351,21 @@ app.get('/api/stats', async (req, res) => {
 });
 
 // ================= ADMIN (token-protected) =================
-// Credentials come from Render environment variables — never hardcode secrets.
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@nuji.ng';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'nuji-admin-2026';
-const SECRET = process.env.ADMIN_SECRET || process.env.SUPABASE_SERVICE_KEY || 'nuji-dev-secret';
+// Credentials come ONLY from environment variables (Render → Environment).
+// There is no hardcoded fallback email/password/secret: if these aren't
+// set, admin login is disabled rather than silently accepting a
+// well-known default.
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+// ADMIN_SECRET should be set explicitly; SUPABASE_SERVICE_KEY is accepted
+// as a fallback signing secret only because it is itself already a
+// real, per-deployment secret pulled from the environment — never a
+// hardcoded string.
+const SECRET = process.env.ADMIN_SECRET || process.env.SUPABASE_SERVICE_KEY || '';
+const ADMIN_CONFIGURED = !!(ADMIN_EMAIL && ADMIN_PASSWORD && SECRET);
+if (!ADMIN_CONFIGURED) {
+  console.warn('⚠️  Admin login is disabled: set ADMIN_EMAIL, ADMIN_PASSWORD and ADMIN_SECRET in the environment.');
+}
 
 const signToken = (payload) => {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -363,6 +383,7 @@ const verifyToken = (token) => {
 };
 
 app.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_CONFIGURED) return res.status(503).json({ error: 'Admin login is not configured on this server' });
   const { email, password } = req.body || {};
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
     return res.json({ token: signToken({ exp: Date.now() + 12 * 3600 * 1000 }) });
@@ -371,6 +392,7 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 const requireAdmin = (req, res, next) => {
+  if (!ADMIN_CONFIGURED) return res.status(503).json({ error: 'Admin login is not configured on this server' });
   const h = req.headers.authorization || '';
   if (!verifyToken(h.startsWith('Bearer ') ? h.slice(7) : '')) return res.status(401).json({ error: 'Unauthorized' });
   next();
@@ -534,7 +556,8 @@ app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
 
 // ================= ADMIN: PROMPTS MANAGER =================
 app.get('/api/admin/prompts', requireAdmin, async (req, res) => {
-  const { data } = await supabase.from('prompts').select('*').order('id', { ascending: false }).limit(300);
+  const { data, error } = await supabase.from('prompts').select('*').order('id', { ascending: false }).limit(300);
+  if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
 });
 app.post('/api/admin/prompts', requireAdmin, async (req, res) => {
