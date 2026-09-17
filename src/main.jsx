@@ -260,7 +260,7 @@ function App() {
   // icons only appear once a FULL profile exists in the database
   const hasProfile = !!(profile && profile.hasProfile);
   const loggedIn = !!phone;
-  const profileData = profile || DEMO_PROFILE;
+  
 
   const navigate = (next) => { const path = pathMap[next] || '/'; window.history.pushState({}, '', path); setPage(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
@@ -1273,8 +1273,12 @@ function Listen({ language, setLanguage, phone, refreshProfile }) {
   };
 
   return <section className="task-page listen-page"><div className="container task-layout">
-    <aside className="task-aside"><div className="eyebrow ink">Listen</div><h1>Help keep every<br/><em>voice clear.</em></h1><p>Listen to a short recording, compare it to the sentence, and make a simple call.</p><div className="task-aside-card"><span>Reviewing in</span><LanguageSelect language={language} setLanguage={setLanguage}/><div className="mini-progress"><div><span>This session</span><b>{clipNum}/10 clips</b></div><div className="progress-track green-track"><i style={{width: `${clipNum*10}%`}}/></div></div></div></aside>
-
+    <aside className="task-aside"><div className="eyebrow ink">Contribute</div><h1>Speak a little<br/><em>closer to home.</em></h1><p>
+      Read each prompt naturally. Type it, say it, or both — every clear contribution makes the collection stronger.</p>
+      <div className="task-aside-card"><span>Language</span><LanguageSelect language={language} setLanguage={setLanguage}/>
+      <div style={{marginTop:'10px',padding:'8px 12px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',fontSize:'12px',color:'#16a34a',fontWeight:'600'}}>🌍 You are contributing in <strong>{language.name}</strong> — respond in {language.name}!</div>
+      <div className="mini-progress"><div><span>Today's goal</span><b>{count}/10 sentences</b></div><div className="progress-track"><i style={{width: `${count*10}%`}}/></div></div></div>
+      <div className="aside-tip"><CircleHelp size={18}/><span>Find a quiet spot and speak at a comfortable pace.</span></div></aside>
     <div className="task-main"><div className="review-kicker"><span>Clip {clipNum} of 10</span><span>About 1 minute left</span></div><div className="task-card validation-card"><div className="task-card-head"><span className="language-badge"><span className={`dot ${language.color}`}/> {language.name}</span><span className="counter">Community review</span></div>{!decision ? <><h2>Does this recording match?</h2><div className="listen-prompt"><span>The prompt they responded to</span><p>“{clip && clip.prompt ? clip.prompt : '—'}”</p>{clip && clip.text && (<><span style={{ display: 'block', marginTop: 10 }}>Contributor's response ({language.name}) — does the voice match it?</span><p>“{clip.text}”</p></>)}{clip && clip.translation && (<><span style={{ display: 'block', marginTop: 10 }}>English translation</span><p>“{clip.translation}”</p></>)}</div>{clip ? <div className="listen-player"><button className="listen-play" onClick={togglePlay} aria-label={playing ? 'Pause recording' : 'Play recording'}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button><div className="player-wave">{Array.from({length:35},(_,i) => <b key={i} style={{height: `${9 + Math.abs(Math.sin(i*.55))*28}px`}}/>)}</div><span>{dur ? fmtDur(dur) : '—'}</span></div> : <p className="task-help">No voice recordings waiting for review in {language.name} yet — contribute a voice or check back soon.</p>}<p className="decision-label">Listen once, then choose what you heard.</p><div className="decision-grid"><button className="decision yes" onClick={() => decide('yes')}><span><Check size={21}/></span><div><b>Yes, it matches</b><small>The words are clear and correct</small></div></button><button className="decision no" onClick={() => decide('no')}><span><X size={20}/></span><div><b>No, it doesn’t match</b><small>The words are different or unclear</small></div></button></div><button className="skip-btn" onClick={() => setSkip(s => s + 1)}>Skip this clip <SkipForward size={16}/></button></> : <><div className={`task-icon ${decision === 'yes' ? 'success' : 'neutral'}`}>{decision === 'yes' ? <Check size={29}/> : <X size={29}/>}</div><h2>{decision === 'yes' ? 'Thanks for confirming.' : 'Thanks for reviewing.'}</h2><p className="task-intro">Your review helps keep this collection useful for everyone who speaks {language.name}.</p><button className="btn btn-primary task-cta" onClick={next}>Next clip <ArrowRight size={18}/></button><button className="text-action centered" onClick={() => setDecision(null)}>Change answer</button></>}</div></div>
   </div></section>;
 }
