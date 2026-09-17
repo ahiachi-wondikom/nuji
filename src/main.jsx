@@ -1118,7 +1118,7 @@ function Contribute({ language, setLanguage, phone, refreshProfile, navigate, on
       if (result && result.error === 'duplicate') setSubmitError('This response is identical (or nearly identical) to one you already submitted — please say something new.');
       else if (result && result.error === 'too_short') setSubmitError(AUDIO_ERROR_MSG.too_short);
       else if (result && result.error === 'bad_audio') setSubmitError(AUDIO_ERROR_MSG.bad_audio);
-      else if (result && result.error === 'too_short_text') setSubmitError('Too short — use at least 3 words.');
+      else if (result && result.error === 'too_short_text') setSubmitError('Too short — please type your response.');
       else setSubmitError('Something went wrong while saving — please try again.');
       return;
     }
