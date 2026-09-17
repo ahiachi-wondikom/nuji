@@ -307,7 +307,8 @@ function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">Skip to main content</a>
-      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} points={profileData.points} />
+      <Nav page={page} menuOpen={menuOpen} setMenuOpen={setMenuOpen} navigate={navigate} 
+      hasProfile={hasProfile} loggedIn={loggedIn} points={profileData?.points || 0} />
       <main id="main">
         {page === 'home' && <Home navigate={navigate} language={language} setLanguage={setLanguage} hasProfile={hasProfile} loggedIn={loggedIn} />}
         {page === 'about' && <About navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} />}
@@ -316,7 +317,9 @@ function App() {
         {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
-        {page === 'profile' && <Profile navigate={navigate} profile={profileData} onLogout={logout} />}
+        const profileData = profile || { points: 0, nickname: '', badges: [], streak: 0 };
+        {page === 'profile' && <Profile navigate={navigate}
+         profile={profileData} onLogout={logout} />}
         {page === 'admin' && <Admin />}
       </main>
       {page !== 'admin' && <Footer navigate={navigate} hasProfile={hasProfile} loggedIn={loggedIn} />}
