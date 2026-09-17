@@ -151,7 +151,7 @@ function audioProblems(m) {
   return p;
 }
 const AUDIO_ERROR_MSG = {
-  too_short: 'Recording is under 3 seconds — speak a little longer and try again.',
+  too_short: 'Recording is under 1 seconds — speak a little longer and try again.',
   silent: 'No voice detected (silent recording). Check your microphone and try again.',
   noisy: 'Extreme background noise detected. Move to a quieter spot and try again.',
   no_voice: 'We could not detect a clear human voice in this recording. Please speak clearly into the microphone and try again — background noise alone is not accepted.',
@@ -188,32 +188,7 @@ const FALLBACK_BADGES = [
 
 const recentWeeks = [0,1,0,0,0, 0,2,0,1,0, 0,1,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,1,0];
 
-// Demo profile shown only when the backend is unreachable
-const DEMO_PROFILE = {
-  // phone: '', nickname: '', state: 'Anambra', lga: '',
-  // points: 153, rank: 1, submissions: 43, reviews: 9,
-  // level: 'Expert Contributor', levelProgress: 73, levelTarget: 100, streak: 1,
-  // profileKind: 'full', hasProfile: true,
-  // overview: [
-  //   { icon: 'total', number: 43, label: 'Total' },
-  //   { icon: 'text', number: 25, label: 'Text Only' },
-  //   { icon: 'voice', number: 4, label: 'Voice Only' },
-  //   { icon: 'both', number: 14, label: 'Text + Voice' },
-  //   { icon: 'mix', number: 3, label: 'Code-switched' },
-  //   { icon: 'reviews', number: 9, label: 'Reviews Done' }
-  // ],
-  // breakdown: [
-  //   { label: 'Text only', count: 1, rate: 3 },
-  //   { label: 'Voice only', count: 0, rate: 2 },
-  //   { label: 'Text + Voice', count: 0, rate: 5 }
-  // ],
-  // activityCells: [...Array(371 - recentWeeks.length).fill(0), ...recentWeeks],
-  // activityMonths: ['S', 'O', 'N', 'D', 'J', 'F', 'M', 'A', 'M', 'J', 'J', 'A'],
-  // badges: FALLBACK_BADGES,
-  // badgesEarned: FALLBACK_BADGES.filter(b => b.earned).length,
-  // badgesTotal: FALLBACK_BADGES.length,
-  // referral: { url: 'https://nuji-test.netlify.app/?ref=', joined: 0, points: 0 }
-};
+
 
 // Nigeria's 36 states + FCT with LGAs
 const nigeriaStates = {
@@ -1100,15 +1075,15 @@ function Contribute({ language, setLanguage, phone, refreshProfile, navigate, on
   const submit = async () => {
     setSubmitError('');
     // minimum word count for text responses
-    if (hasText && textResponse.trim().split(/\s+/).length < 3) {
-      setSubmitError('Too short — use at least 3 words.');
+    if (hasText && textResponse.trim().split(/\s+/).length < 2) {
+      setSubmitError('Too short — use at least 2 words.');
       return;
     }
     // final safety net: re-validate the audio at submit time
     if (audioBlob) {
       const probs = audioProblems(audioMeta);
       const dur = (audioMeta && audioMeta.duration) || time;
-      if (dur < 3 || probs.length) {
+      if (dur < 1 || probs.length) {
         setAudioError(AUDIO_ERROR_MSG[probs[0] || 'too_short']);
         setSubmitError(AUDIO_ERROR_MSG[probs[0] || 'too_short']);
         setRecStage('idle'); setAudioBlob(null); setAudioMeta(null);
