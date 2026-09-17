@@ -303,7 +303,7 @@ function App() {
 
   useEffect(() => { const onPop = () => setPage(routeMap[window.location.pathname] || 'home'); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop); }, []);
   useEffect(() => { document.title = `Nuji — ${page === 'home' ? 'Voices build the future' : page[0].toUpperCase() + page.slice(1)}`; }, [page]);
-
+ const profileData = profile || { points: 0, nickname: '', badges: [], streak: 0 };
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">Skip to main content</a>
@@ -317,7 +317,7 @@ function App() {
         {page === 'listen' && <Listen language={language} setLanguage={setLanguage} phone={phone} refreshProfile={refreshProfile} />}
         {page === 'leaderboard' && <Leaderboard />}
         {page === 'state' && <StatePage navigate={navigate} />}
-        const profileData = profile || { points: 0, nickname: '', badges: [], streak: 0 };
+       
         {page === 'profile' && <Profile navigate={navigate}
          profile={profileData} onLogout={logout} />}
         {page === 'admin' && <Admin />}
