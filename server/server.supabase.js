@@ -460,13 +460,15 @@ app.post('/api/admin/status', requireAdmin, async (req, res) => {
 });
 
 // admin: save translation / annotation from the review console
-app.post('/api/admin/meta', requireAdmin, async (req, res) => {
-  const { id, translation, annotation, annotationStatus } = req.body || {};
+app.post('/api/admin/meta', requireAdmin, async (req, res) => {   
+ const { id, translation, annotation, annotationStatus, linguisticText, isVerified } = req.body || {};
   const patch = {};
   if (typeof translation === 'string') patch.translation = translation;
   if (typeof annotation === 'string') patch.annotation = annotation;
   if (typeof annotationStatus === 'string') patch.annotation_status = annotationStatus;
   if (typeof (req.body || {}).text === 'string') patch.text = req.body.text;
+  if (typeof linguisticText === 'string') patch.linguistic_text = linguisticText;
+  if (typeof isVerified === 'boolean') patch.is_verified = isVerified;
   const { error } = await supabase.from('contributions').update(patch).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
