@@ -13,184 +13,11 @@ import {
 import { api } from './api.js';
 import './styles.css';
 
-const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-const fmtDur = (s) => s ? `${Number(s).toFixed(1)}s` : '—';
-
-const STATUS = {
-  pending: { label: 'Pending', cls: 'st-pending' },
-  approved: { label: 'Approved', cls: 'st-approved' },
-  flagged: { label: 'Flagged', cls: 'st-flagged' },
-  rejected: { label: 'Rejected', cls: 'st-rejected' }
-};
-
-const PROMPT_LANGS = ['Igbo', 'Yoruba', 'Hausa', 'Pidgin', 'English'];
-const PROMPT_CATS = ['Greetings', 'Hospitality', 'Health', 'Business', 'Money', 'Family', 'Work', 'Travels', 'Transportation'];
-
-const TAGS = [
-  { tag: 'IGBO', label: 'Igbo', color: '#059669', bg: '#f0fdf4' },
-  { tag: 'YOR', label: 'Yoruba', color: '#d97706', bg: '#fff7ed' },
-  { tag: 'HAU', label: 'Hausa', color: '#0284c7', bg: '#eff6ff' },
-  { tag: 'PID', label: 'Pidgin', color: '#7c3aed', bg: '#f5f3ff' },
-  { tag: 'ENG', label: 'English', color: '#6b7280', bg: '#f3f4f6' }
-];
-
-
-// ---------- audio quality validation (same standard as the contributor Speak page) ----------
-function fftInPlace(re, im) {
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
-    for (let i = 0; i < n; i += len) {
-      let cwr = 1, cwi = 0;
-      for (let j = 0; j < len / 2; j++) {
-        const ur = re[i + j], ui = im[i + j];
-        const vr = re[i + j + len / 2] * cwr - im[i + j + len / 2] * cwi;
-        const vi = re[i + j + len / 2] * cwi + im[i + j + len / 2] * cwr;
-        re[i + j] = ur + vr; im[i + j] = ui + vi;
-        re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
-        const nw = cwr * wr - cwi * wi; cwi = cwr * wi + cwi * wr; cwr = nw;
-      }
-    }
-  }
-}
-
-async function analyzeAudio(blob) {
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AC();
-    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
-    const sr = buf.sampleRate;
-    const ch = buf.getChannelData(0);
-    ctx.close();
-
-    let sum = 0, zc = 0, prev = 0, n = 0, active = 0;
-    const step = Math.max(1, Math.floor(ch.length / 60000));
-    for (let i = 0; i < ch.length; i += step) { const v = ch[i]; sum += v * v; if (Math.abs(v) > 0.01) active++; if ((v >= 0) !== (prev >= 0)) zc++; prev = v; n++; }
-    const rms = Math.sqrt(sum / (n || 1));
-    const zcr = zc / (n || 1);
-
-    const N = 1024, hop = 512;
-    const frameCount = Math.max(0, Math.floor((ch.length - N) / hop) + 1);
-    const energies = [], flatArr = [], bandArr = [], zcrArr = [];
-    const re = new Float64Array(N), im = new Float64Array(N);
-    const binHz = sr / N;
-    const loBin = Math.max(2, Math.round(80 / binHz)), hiBin = Math.min(N / 2 - 1, Math.round(3500 / binHz));
-    for (let f = 0; f < frameCount; f++) {
-      const off = f * hop;
-      let e = 0, z = 0, pv = 0;
-      for (let i = 0; i < N; i++) {
-        const v = ch[off + i];
-        re[i] = v * (0.54 - 0.46 * Math.cos(2 * Math.PI * i / (N - 1)));
-        im[i] = 0;
-        e += v * v;
-        if ((v >= 0) !== (pv >= 0)) z++;
-        pv = v;
-      }
-      e = Math.sqrt(e / N);
-      energies.push(e);
-      zcrArr.push(z / N);
-      fftInPlace(re, im);
-      let total = 0, band = 0, logSum = 0, linSum = 0;
-      for (let k = 1; k < N / 2; k++) {
-        const p = re[k] * re[k] + im[k] * im[k];
-        total += p;
-        if (k >= loBin && k <= hiBin) band += p;
-        const pp = p + 1e-12;
-        logSum += Math.log(pp); linSum += pp;
-      }
-      const bins = N / 2 - 1;
-      flatArr.push(Math.exp(logSum / bins) / ((linSum / bins) || 1e-12));
-      bandArr.push(total ? band / total : 0);
-    }
-
-    const sorted = [...energies].sort((a, b) => a - b);
-    const pct = (q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : 0;
-    const floor = Math.max(pct(0.2), 0.0015);
-    const thr = Math.max(floor * 3, 0.004);
-
-    let activeFrames = 0, voicedFrames = 0, flatSum = 0, bandSum = 0;
-    for (let f = 0; f < frameCount; f++) {
-      if (energies[f] <= thr) continue;
-      activeFrames++;
-      if (zcrArr[f] < 0.2) voicedFrames++;
-      flatSum += flatArr[f];
-      bandSum += bandArr[f];
-    }
-    const activeFracV = frameCount ? activeFrames / frameCount : 0;
-    const voicedFrac = frameCount ? voicedFrames / frameCount : 0;
-    const flatness = activeFrames ? flatSum / activeFrames : 1;
-    const bandRatio = activeFrames ? bandSum / activeFrames : 0;
-    const dynamics = pct(0.9) / Math.max(pct(0.1), floor * 0.5, 1e-4);
-
-    const voice = {
-      activeFrac: activeFracV, voicedFrac, flatness, bandRatio, dynamics,
-      ok: activeFracV >= 0.18 && voicedFrac >= 0.12 && flatness <= 0.4 && bandRatio >= 0.45 && dynamics >= 2.2
-    };
-    return { duration: buf.duration, rms, zcr, activeFrac: n ? active / n : 0, n, voice };
-  } catch { return null; }
-}
-
-function audioProblems(m) {
-  if (!m) return [];
-  const p = [];
-  if (m.duration < 3) p.push('too_short');
-  if (m.n > 0 && (m.activeFrac < 0.05 || m.rms < 0.005)) p.push('silent');
-  if (m.n > 0 && (m.rms > 0.35 || (m.zcr > 0.4 && m.rms > 0.06))) p.push('noisy');
-  if (m.voice && !m.voice.ok) p.push('no_voice');
-  return p;
-}
-const AUDIO_ERROR_MSG = {
-  too_short: 'Recording is under 3 seconds — record a little longer and try again.',
-  silent: 'No voice detected (silent recording). Check the microphone and try again.',
-  noisy: 'Extreme background noise detected. Try recording in a quieter spot.',
-  no_voice: 'No clear human voice detected in this recording. Background noise alone cannot be accepted — please re-record or upload a file with a real voice.',
-  bad_audio: 'This audio file could not be analyzed. Please try a different file or re-record.'
-};
-// ---------- CSV / PDF export ----------
-const csvEscape = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-const downloadCSV = (name, rows) => {
-  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
-};
-
-function ExportBar({ rows, filename }) {
-  return (
-    <div className="admin-export">
-      <button className="admin-export-btn" onClick={() => downloadCSV(filename, rows)} title="Download CSV"><FileDown size={14} /> CSV</button>
-      <button className="admin-export-btn" onClick={() => window.print()} title="Print / Save as PDF"><Printer size={14} /> PDF</button>
-    </div>
-  );
-}
-
-function AudioCell({ url }) {
-  const [playing, setPlaying] = useState(false);
-  const ref = useRef(null);
-  if (!url) return <span className="admin-muted">—</span>;
-  const toggle = (e) => {
-    e && e.stopPropagation();
-    if (!ref.current) { ref.current = new Audio(url); ref.current.onended = () => setPlaying(false); }
-    if (playing) { ref.current.pause(); setPlaying(false); }
-    else { ref.current.play(); setPlaying(true); }
-  };
-  return (
-    <div className="admin-audio" onClick={e => e.stopPropagation()}>
-      <button className="admin-mini-btn play" onClick={toggle} title={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={13} /> : <Play size={13} />}</button>
-      <a className="admin-mini-btn" href={url} download="nuji-recording.webm" title="Download audio"><Download size={13} /></a>
-    </div>
-  );
-}
+import { fmtDate, fmtTime, fmtDur, STATUS, PROMPT_LANGS, PROMPT_CATS } from './admin/constants.js';
+import ExportBar from './admin/ExportBar.jsx';
+import DetailModal from './admin/DetailModal.jsx';
+import AnnotateTab from './admin/AnnotateTab.jsx';
+import SubmissionsTab from './admin/SubmissionsTab.jsx';
 
 function Field({ label, children }) { return <label className="form-field"><span>{label}</span>{children}</label> }
 
@@ -492,6 +319,8 @@ function AnnotateTab({ onChanged }) {
   const [segments, setSegments] = useState([]);
   const [saved, setSaved] = useState(0);
   const [showGuide, setShowGuide] = useState(false);
+  const [linguisticText, setLinguisticText] = useState('');
+  const [isVerified, setIsVerified] = useState(false);
 
   const load = useCallback(() => (api.adminAnnotateQueue ? api.adminAnnotateQueue() : Promise.resolve([])).then(q => { setQueue(q || []); setIdx(0); }), []);
   useEffect(() => { load(); }, [load]);
@@ -504,6 +333,8 @@ function AnnotateTab({ onChanged }) {
     const words = (current.fullText || current.text || '').split(/\s+/).filter(Boolean);
     setSegments(words.map(w => ({ word: w, tag: null })));
     setSelectedTag(null);
+    setLinguisticText('');
+    setIsVerified(false);
   }, [idx, current && current.id]);
 
   if (!queue) return <p className="admin-muted" style={{ textAlign: 'center', padding: 40 }}>Loading annotation queue…</p>;
@@ -534,9 +365,16 @@ function AnnotateTab({ onChanged }) {
   const switchPoints = Math.max(0, build().length - 1);
 
   const save = async () => {
-    await api.adminUpdateMeta({ id: current.id, annotation: preview, annotationStatus: 'annotated' });
+    await api.adminUpdateMeta({
+      id: current.id,
+      annotation: preview,
+      annotationStatus: 'annotated',
+      linguisticText: linguisticText.trim() || null,
+      isVerified,
+    });
     setSaved(s => s + 1); setIdx(i => i + 1); onChanged();
   };
+
   const skip = async () => {
     await api.adminUpdateMeta({ id: current.id, annotationStatus: 'skipped' });
     setIdx(i => i + 1);
@@ -558,19 +396,46 @@ function AnnotateTab({ onChanged }) {
         {showGuide && (
           <div className="admin-modal-section">
             <h5>How to annotate</h5>
-            <p>1) Select a language tag below · 2) click words to label them (click again to untag) · 3) “Tag all” sets one language for the whole text, then fix exceptions · 4) Save — or Skip if unclear. 💡 Tip: tag all with the dominant language first.</p>
+            <p>1) Select a language tag below · 2) click words to label them (click again to untag) · 3) "Tag all" sets one language for the whole text, then fix exceptions · 4) Add proper diacritics in the Linguistic Text field · 5) Check "Verified" if you are confident · 6) Save — or Skip if unclear. 💡 Tip: tag all with the dominant language first.</p>
           </div>
         )}
 
         <div className="admin-modal-section">
           <h5>Submission · {current.language} · {fmtDate(current.createdAt)}</h5>
-          <p>{current.fullText || current.text}</p>
+          <p style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: 8, fontStyle: 'italic' }}>"{current.fullText || current.text}"</p>
+          {current.translation && <p style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>Translation: "{current.translation}"</p>}
           {current.hasAudio && <div style={{ marginTop: 8 }}><AudioCell url={current.audioUrl} /> <span className="admin-muted" style={{ fontSize: 12 }}>{fmtDur(current.duration)} — listen while annotating</span></div>}
         </div>
 
+        {/* ── Linguistic Text Field ── */}  
+        <div className="admin-modal-section">
+          <h5>Linguistic text <span style={{ fontWeight: 400, color: '#6b7280', fontSize: 12 }}>(add proper diacritics — e.g. mò ń bọ̀)</span></h5>
+          <textarea
+            value={linguisticText}
+            onChange={e => setLinguisticText(e.target.value)}
+            placeholder="Type the properly diacritized version here e.g. Kedụ, ọ dị mma?"
+            rows={2}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: 8,
+              border: '1.5px solid #e5e7eb',
+              fontSize: 14,
+              fontFamily: 'inherit',
+              resize: 'vertical',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+          <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            Listen to the audio and type what the contributor said with correct tone marks and underdots. Leave blank if unsure.
+          </p>
+        </div>
+
+        {/* ── Word Tagger ── */}
         {segments.length > 0 && (
           <div className="admin-modal-section">
-            <h5>Click a tag, then click words</h5>
+            <h5>Click a tag, then click words to label language</h5>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, lineHeight: 2 }}>
               {segments.map((s, i) => {
                 const st = TAGS.find(t => t.tag === s.tag);
@@ -582,7 +447,7 @@ function AnnotateTab({ onChanged }) {
                 );
               })}
             </div>
-          </div>
+          </div>         
         )}
 
         <div className="admin-panel" style={{ marginBottom: 12 }}>
@@ -591,7 +456,7 @@ function AnnotateTab({ onChanged }) {
             <div style={{ display: 'flex', gap: 8 }}>
               {selectedTag && <button className="admin-export-btn" onClick={() => tagAll(selectedTag)}>Tag all as {selectedTag}</button>}
               <button className="admin-export-btn" onClick={clearAll}>Clear all</button>
-            </div>
+            </div>      
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {TAGS.map(t => (
@@ -611,11 +476,29 @@ function AnnotateTab({ onChanged }) {
           </div>
         )}
 
+        {/* ── Verified Checkbox ── */}
+        <div className="admin-modal-section">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={isVerified}
+              onChange={e => setIsVerified(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: '#16a34a', cursor: 'pointer' }}
+            />
+            <div>
+              <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>Mark as verified</span>
+              <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>Check this only if you are confident the linguistic text and annotation are correct</p>
+            </div>
+          </label>
+        </div>
+
         <div className="admin-modal-actions">
           <button className="btn btn-secondary" style={{ flex: 1 }} onClick={skip}>Skip →</button>
-          <button className="btn btn-primary" style={{ flex: 2 }} disabled={!segments.some(s => s.tag)} onClick={save}><Check size={15} /> Save annotation</button>
+          <button className="btn btn-primary" style={{ flex: 2 }} onClick={save}>
+            <Check size={15} /> {isVerified ? '✅ Save & Verify' : 'Save annotation'}
+          </button>
         </div>
-        <p className="admin-muted" style={{ fontSize: 11.5, textAlign: 'center', marginTop: 10 }}>You don't need to tag every word — focus on the language switches.</p>
+        <p className="admin-muted" style={{ fontSize: 11.5, textAlign: 'center', marginTop: 10 }}>You don't need to tag every word — focus on the language switches and diacritics.</p>
       </div>
     </div>
   );
@@ -925,8 +808,8 @@ useEffect(() => { if (!token) return; if (tab === 'analytics' || tab === 'overvi
               {filteredUsers.length === 0 && <p className="admin-empty">No contributors match “{query}”. Share Nuji to get started! 🚀</p>}
             </div>
           </div>
-        </div>}
-
+        </div>}   
+             
         {/* ============ PROMPTS MANAGER ============ */}
         {tab === 'prompts' && <div className="admin-content">
           <div className="admin-kpis" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>

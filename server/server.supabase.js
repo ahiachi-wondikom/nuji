@@ -143,7 +143,7 @@ app.post('/api/profile', async (req, res) => {
       gender: gender || user.gender,
       languages: kind === 'full' ? (languages || []) : user.languages,
       contributionLang: contribution || user.contributionLang
-    });
+    }); 
     // never downgrade a full profile to quick
     if (kind === 'full') user.profileKind = 'full';
     else if (!user.profileKind) user.profileKind = 'quick';
@@ -569,7 +569,7 @@ app.get('/api/admin/annotate-queue', requireAdmin, async (req, res) => {
   const { data } = await supabase.from('contributions').select('*').order('created_at', { ascending: false }).limit(500);
   const q = (data || []).filter(c => (c.text || '').trim() && (c.annotation_status || 'pending') === 'pending');
   res.json(q.slice(0, 50));
-});
+});   
 
 // ---------------- start (prompts come only from the database / admin panel) ----------------
 const PORT = process.env.PORT || 4000;
